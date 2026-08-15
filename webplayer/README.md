@@ -21,6 +21,9 @@ anywhere, everything (ROM, emulator core, your song) stays local to the page.
 * Play results back immediately with the built-in `<audio>` players, or download them
 * Multiple outputs (stems) can be downloaded together as one `.zip`
 * Drag-and-drop or click to choose a `.gmdj`
+* Bundles a v0.19 ROM by default, but you can supply a different one (the
+  "ROM version" section) if a later genmddj release changes the song data
+  format, so an old bundled ROM doesn't silently mis-render a newer song
 
 ## Getting a `.gmdj` to render
 

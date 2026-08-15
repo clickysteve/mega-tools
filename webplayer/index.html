@@ -6,6 +6,11 @@
   browsers block WASM+fetch there) alongside the other three files in this
   folder: genesis_plus_gx_libretro.js, genesis_plus_gx_libretro.wasm, genmddj.bin.
 
+  genmddj.bin is the bundled default ROM (currently v0.19). The page also
+  lets you supply a different ROM at render time (see the "ROM version"
+  details section), since a future genmddj release could change the song
+  data format and make an old bundled ROM render a newer song incorrectly.
+
   See NOTICE.md for attribution and license terms for the bundled emulator core.
 -->
 <html>
@@ -50,6 +55,11 @@
   .track a{ color:#6ea8e0; font-size:12px; text-decoration:none; white-space:nowrap; }
   h2{ font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#7d8595; margin:0 0 10px; }
   .note{ font-size:12px; color:#7d8595; margin-top:10px; }
+  .romopt{ margin-top:10px; border:1px solid #2a2e38; border-radius:8px; padding:10px 12px; }
+  .romopt summary{ cursor:pointer; font-size:13px; color:#9aa3b2; }
+  .romopt summary span{ color:#6ea8e0; font-family:ui-monospace,monospace; }
+  .romopt .note{ margin:8px 0 10px; }
+  .romopt button{ padding:6px 12px; font-size:12.5px; }
 </style>
 </head>
 <body>
@@ -66,6 +76,14 @@
       <div class="fname" id="fname"></div>
     </div>
     <input type="file" id="gmdj" accept=".gmdj" hidden>
+
+    <details class="romopt">
+      <summary>ROM version: <span id="romlabel">bundled v0.19</span></summary>
+      <div class="note">This player bundles the v0.19 genmddj ROM. If genmddj's song data format changes in a later release, a song made with a newer build may render wrong (or fail) against this ROM. If that happens, download the matching release .bin from <a href="https://github.com/little-scale/genmddj/releases" style="color:#6ea8e0">the genmddj releases page</a> and use it here instead.</div>
+      <button class="ghost" id="romChoose" type="button">Choose a different ROM (.bin)&hellip;</button>
+      <button class="ghost" id="romReset" type="button" style="display:none">Use bundled v0.19</button>
+      <input type="file" id="romfile" accept=".bin" hidden>
+    </details>
 
     <div class="row">
       <div>
@@ -311,6 +329,33 @@ function loadRom() {
   return romPromise;
 }
 
+// ---- optional user-supplied ROM, overrides the bundled one when set.
+// Exists because a future genmddj release could change the song-data format
+// (it's happened before -- NCHAINS and NPHRASES have both grown in past
+// releases), which would make this player's bundled v0.19 ROM render a
+// newer song incorrectly. Uploading the matching release ROM sidesteps that.
+let customRom = null, customRomName = "";
+const romChoose = document.getElementById("romChoose"), romResetBtn = document.getElementById("romReset");
+const romFileInput = document.getElementById("romfile"), romLabel = document.getElementById("romlabel");
+romChoose.onclick = () => romFileInput.click();
+romFileInput.onchange = async () => {
+  const f = romFileInput.files[0];
+  if (!f) return;
+  customRom = new Uint8Array(await f.arrayBuffer());
+  customRomName = f.name;
+  romLabel.textContent = customRomName;
+  romResetBtn.style.display = "";
+};
+romResetBtn.onclick = () => {
+  customRom = null; customRomName = "";
+  romFileInput.value = "";
+  romLabel.textContent = "bundled v0.19";
+  romResetBtn.style.display = "none";
+};
+function getRom() {
+  return customRom ? Promise.resolve(customRom) : loadRom();
+}
+
 async function renderOnce(mod, rom, song, seconds, outputRate, ymCore, voiceMask) {
   const outSamples = [];
   let resampler = null;
@@ -398,7 +443,7 @@ async function render() {
 
   try {
     status.textContent = "Loading emulator core\u2026";
-    const [{ factory, wasmBinary }, rom] = await Promise.all([loadCore(), loadRom()]);
+    const [{ factory, wasmBinary }, rom] = await Promise.all([loadCore(), getRom()]);
     const song = parseSong(await file.arrayBuffer());
 
     const seconds = Math.min(300, Math.max(1, parseInt($("#seconds").value, 10) || 30));

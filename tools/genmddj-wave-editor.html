@@ -1,0 +1,221 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>genmddj wave editor</title>
+<style>
+  :root { --bg:#10131a; --panel:#1b2030; --ink:#e7ecf5; --dim:#8b96ab;
+          --accent:#ffd23f; --accent2:#46c0ff; --empty:#2a3140; --good:#5ad17a; --bad:#ff6b6b; }
+  *{box-sizing:border-box;} body{margin:0;background:var(--bg);color:var(--ink);font:14px/1.5 ui-monospace,Menlo,Consolas,monospace;}
+  .wrap{max-width:880px;margin:0 auto;padding:20px;}
+  h1{font-size:20px;letter-spacing:1px;margin:0 0 4px;} h1 span{color:var(--accent);}
+  p.dim,.dim{color:var(--dim);} code{color:var(--accent);}
+  .zone{border:2px dashed #3a4256;border-radius:10px;padding:18px;text-align:center;color:var(--dim);cursor:pointer;margin:12px 0;transition:.15s;}
+  .zone.hot{border-color:var(--accent);color:var(--ink);background:#161b27;}
+  .bar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;background:var(--panel);border-radius:8px;padding:10px 14px;margin:10px 0;}
+  button,select{background:#2a3550;color:var(--ink);border:1px solid #3c4a68;border-radius:6px;padding:5px 10px;font:inherit;cursor:pointer;}
+  button:hover:not(:disabled){border-color:var(--accent2);} button.primary{background:var(--accent);color:#1a1400;border-color:var(--accent);font-weight:bold;}
+  button:disabled{opacity:.4;cursor:not-allowed;}
+  .waves{display:flex;flex-wrap:wrap;gap:4px;margin:8px 0;}
+  .wv{width:30px;height:26px;border:1px solid #34405a;border-radius:4px;background:#0d1018;cursor:pointer;display:flex;align-items:center;justify-content:center;font-size:11px;color:var(--dim);position:relative;}
+  .wv.sel{border-color:var(--accent);color:var(--accent);}
+  .wv canvas{position:absolute;inset:0;} .wv span{position:relative;}
+  canvas#ed{background:#0c0f16;border:1px solid #2a3346;border-radius:8px;width:100%;height:240px;touch-action:none;cursor:crosshair;}
+  label{color:var(--dim);} input[type=text]{background:#0d1018;color:var(--ink);border:1px solid #34405a;border-radius:5px;padding:4px 6px;font:inherit;}
+  input#expr{width:24ch;color:var(--accent);} input#expr.err{border-color:var(--bad);}
+  .tiny{font-size:11px;color:var(--dim);}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <h1><span>genmddj</span> WAVE EDITOR</h1>
+  <p class="dim">Edit genmddj <b>wavetables</b> (16 &times; 32 steps, 8-bit, <code>$80</code>=centre; each plays on the
+  YM2612 DAC as a <b>WAVE</b> instrument's shape). Drop a built <code>.bin</code> to edit the <b>factory defaults</b>
+  (the <code>GMDJWAV0</code> bank every <b>NEW</b> song is seeded with), or a <code>.gmdj</code> to edit <b>that
+  song's</b> 16 waves. Draw, pick a preset, or type an <b>expression</b>. ROM exports re-fix the MD checksum.</p>
+
+  <div class="zone" id="zone">drop a genmddj <b>.bin</b> (ROM defaults) or <b>.gmdj</b> (one song) &middot; or click to choose</div>
+  <input type="file" id="file" accept=".bin,.md,.gen,.gmdj" hidden>
+  <div class="bar" id="status">Drop a ROM or a .gmdj to begin.</div>
+
+  <div id="main" style="display:none">
+    <div class="waves" id="waves"></div>
+    <canvas id="ed" width="512" height="240"></canvas>
+    <div class="bar">
+      <label>preset
+        <select id="preset">
+          <option value="">&mdash;</option>
+          <option value="sine">sine</option><option value="saw">saw &uarr;</option><option value="rsaw">saw &darr;</option>
+          <option value="square">square</option><option value="pulse25">pulse 25%</option><option value="pulse12">pulse 12%</option>
+          <option value="tri">triangle</option><option value="halfsine">half-sine</option>
+          <option value="organ">organ (2nd)</option><option value="noise">noise</option><option value="flat">flat (centre)</option>
+        </select>
+      </label>
+      <button id="smooth">smooth</button>
+      <button id="invert">invert</button>
+      <button id="copyto">copy &rarr; all</button>
+      <span class="dim" id="info"></span>
+    </div>
+    <div class="bar">
+      <label>f(x)=&nbsp;<input type="text" id="expr" placeholder="sin(x) + sin(3*x)/3" spellcheck="false"></label>
+      <button id="exprgo">apply</button>
+      <label style="display:inline-flex;gap:5px;align-items:center"><input type="checkbox" id="exprall"> all 16</label>
+      <span class="tiny">x = phase 0&hellip;2&pi; &middot; s = step 0&hellip;31 &middot; returns &minus;1&hellip;1 &middot; <code>sin cos saw tri sq pulse(x,d) noise abs floor pow min max</code></span>
+    </div>
+    <div class="bar">
+      <button class="primary" id="save">Patch ROM .bin</button>
+      <span class="dim" id="note"></span>
+    </div>
+  </div>
+</div>
+
+<script>
+"use strict";
+const NWAVE=16, STEPS=32;
+const WAVEMAGIC="GMDJWAV0", SONGMAGIC="GMDJSONG", DATA_SIZE=23904, WAVE_OFF=23392;  // .gmdj: 32B header + 23904 data block; waves pool at WAVE_OFF (matches src/main.asm SAVE_DATA)
+const $=id=>document.getElementById(id);
+let buf=null, base=-1, mode="", fname="", sel=0, drawing=false, lastStep=-1;
+
+const A=(c)=>c.charCodeAt(0);
+function findMagic(u8,magic){ const m=[...magic].map(A);
+  outer: for(let i=0;i+8<=u8.length;i++){ for(let j=0;j<8;j++) if(u8[i+j]!==m[j]) continue outer; return i; } return -1; }
+function ascii(u8,o,n){ let s=""; for(let i=0;i<n;i++){ const c=u8[o+i]; if(!c)break; s+=String.fromCharCode(c);} return s; }
+const clamp=v=>Math.max(0,Math.min(255,Math.round(v)));
+const getStep=(w,s)=>buf[base+w*STEPS+s];
+const setStep=(w,s,v)=>{ buf[base+w*STEPS+s]=clamp(v); };
+
+// ---- presets (each is just a fixed expression, mapped -1..1 -> 0..255) ----
+const PRESETS={
+  sine:s=>128+127*Math.sin(2*Math.PI*s/STEPS),
+  saw:s=>s/(STEPS-1)*255,
+  rsaw:s=>255-s/(STEPS-1)*255,
+  square:s=>s<STEPS/2?255:0,
+  pulse25:s=>s<STEPS/4?255:0,
+  pulse12:s=>s<STEPS/8?255:0,
+  tri:s=>{const t=s/STEPS;return (t<0.5?t*2:2-t*2)*255;},
+  halfsine:s=>Math.abs(Math.sin(Math.PI*s/STEPS))*255,
+  organ:s=>128+127*Math.sin(2*Math.PI*2*s/STEPS),
+  noise:()=>Math.random()*255,
+  flat:()=>128,
+};
+function applyPreset(name){ const f=PRESETS[name]; if(!f)return; for(let s=0;s<STEPS;s++) setStep(sel,s,f(s)); render(); }
+
+// ---- expression: type a function of x (phase) / s (step), audio-domain -1..1 ----
+function exprFn(src){
+  const names=["sin","cos","tan","abs","sign","floor","ceil","round","sqrt","pow","exp","min","max","PI","E","saw","tri","sq","pulse","noise"];
+  const vals=[Math.sin,Math.cos,Math.tan,Math.abs,Math.sign,Math.floor,Math.ceil,Math.round,Math.sqrt,Math.pow,Math.exp,Math.min,Math.max,Math.PI,Math.E,
+    x=>((((x/Math.PI)%2)+2)%2)-1,                                            // saw  -1..1 over 0..2PI
+    x=>{const t=(((x/(2*Math.PI))%1)+1)%1; return t<0.5?t*4-1:3-t*4;},        // tri  -1..1
+    x=>Math.sin(x)>=0?1:-1,                                                   // square
+    (x,d)=>((((x/(2*Math.PI))%1)+1)%1)<(d===undefined?0.5:d)?1:-1,            // pulse(x, duty)
+    ()=>Math.random()*2-1];
+  const f=new Function(...names,"x","s","n","\"use strict\";return ("+src+");");
+  return (x,s,n)=>f(...vals,x,s,n);
+}
+function applyExpr(){
+  const src=$("expr").value.trim(); if(!src){ return; }
+  let f; try{ f=exprFn(src); const t=f(0,0,STEPS); if(typeof t!=="number") throw new Error("not a number"); }
+  catch(e){ $("expr").classList.add("err"); note("expression error: "+e.message,true); return; }
+  $("expr").classList.remove("err");
+  const all=$("exprall").checked, ws=all?[...Array(NWAVE).keys()]:[sel];
+  for(const w of ws) for(let s=0;s<STEPS;s++){ const x=2*Math.PI*s/STEPS;
+    let v=f(x,s,STEPS); if(!isFinite(v)) v=0;
+    setStep(w,s,128+127*v); }                                                // -1..1 -> 0..255 (128 centre)
+  render(); note("applied  f(x)="+src+(all?"  (all 16)":"  (wave "+sel.toString(16).toUpperCase()+")"));
+}
+
+// ---- canvas editor ----
+const cv=$("ed"), cx=cv.getContext("2d");
+function drawWaveOn(ctx,w,W,H,big){
+  ctx.clearRect(0,0,W,H);
+  if(big){ ctx.strokeStyle="#232b3c"; ctx.lineWidth=1; ctx.beginPath(); ctx.moveTo(0,H/2); ctx.lineTo(W,H/2); ctx.stroke(); }
+  const bw=W/STEPS;
+  for(let s=0;s<STEPS;s++){ const v=getStep(w,s), y=H-(v/255)*H;
+    ctx.fillStyle = big ? (v>=128?"#46c0ff":"#ffd23f") : "#46c0ff";
+    if(big){ ctx.fillRect(s*bw+1, Math.min(y,H/2), bw-2, Math.abs(H/2-y)||1); }
+    else { ctx.fillRect(s*bw, y, Math.max(1,bw), 2); }
+  }
+}
+function render(){
+  drawWaveOn(cx, sel, cv.width, cv.height, true);
+  document.querySelectorAll(".wv").forEach((el,w)=>{ el.classList.toggle("sel",w===sel);
+    const c=el.querySelector("canvas"); if(c) drawWaveOn(c.getContext("2d"),w,c.width,c.height,false); });
+  $("info").textContent=`wave ${sel.toString(16).toUpperCase()} · 32 steps · 8-bit · ${mode==="rom"?"ROM defaults":"this song"}`;
+}
+function evToStepVal(e){
+  const r=cv.getBoundingClientRect(), x=(e.clientX-r.left)/r.width*cv.width, y=(e.clientY-r.top)/r.height*cv.height;
+  const s=Math.max(0,Math.min(STEPS-1,Math.floor(x/(cv.width/STEPS)))), v=Math.max(0,Math.min(255,Math.round((1-y/cv.height)*255)));
+  return {s,v};
+}
+function paint(e){ const {s,v}=evToStepVal(e);
+  if(lastStep>=0 && Math.abs(s-lastStep)>1){ const a=Math.min(s,lastStep), b=Math.max(s,lastStep); for(let i=a;i<=b;i++) setStep(sel,i,v); }
+  else setStep(sel,s,v); lastStep=s; render(); }
+cv.addEventListener("pointerdown",e=>{drawing=true;lastStep=-1;cv.setPointerCapture(e.pointerId);paint(e);});
+cv.addEventListener("pointermove",e=>{if(drawing)paint(e);});
+cv.addEventListener("pointerup",()=>{drawing=false;lastStep=-1;});
+cv.addEventListener("pointerleave",()=>{lastStep=-1;});
+
+// ---- tools ----
+$("smooth").onclick=()=>{ const o=[...Array(STEPS)].map((_,s)=>getStep(sel,s));
+  for(let s=0;s<STEPS;s++) setStep(sel,s,(o[(s-1+STEPS)%STEPS]+o[s]*2+o[(s+1)%STEPS])/4); render(); };
+$("invert").onclick=()=>{ for(let s=0;s<STEPS;s++) setStep(sel,s,255-getStep(sel,s)); render(); };
+$("copyto").onclick=()=>{ const src=[...Array(STEPS)].map((_,s)=>getStep(sel,s)); for(let w=0;w<NWAVE;w++) src.forEach((v,s)=>setStep(w,s,v)); render(); };
+$("preset").onchange=()=>{ applyPreset($("preset").value); $("preset").value=""; };
+$("exprgo").onclick=applyExpr;
+$("expr").addEventListener("keydown",e=>{ if(e.key==="Enter") applyExpr(); });
+
+function buildWaves(){ const box=$("waves"); box.innerHTML="";
+  for(let w=0;w<NWAVE;w++){ const el=document.createElement("div"); el.className="wv"; el.title="wave "+w.toString(16).toUpperCase();
+    const c=document.createElement("canvas"); c.width=28; c.height=24; el.appendChild(c);
+    const sp=document.createElement("span"); sp.textContent=w.toString(16).toUpperCase(); el.appendChild(sp);
+    el.onclick=()=>{ sel=w; render(); };
+    box.appendChild(el); }
+}
+
+// ---- file io ----
+function note(m,bad){ const e=$("note"); e.textContent=m; e.style.color=bad?"#ff6b6b":""; }
+function dl(u8,name){const b=new Blob([u8],{type:"application/octet-stream"});const a=document.createElement("a");
+  a.href=URL.createObjectURL(b);a.download=name;a.click();setTimeout(()=>URL.revokeObjectURL(a.href),500);}
+function load(b,name){
+  fname=name; sel=0;
+  const wb=findMagic(b,WAVEMAGIC);
+  if(wb>=0){                                          // a built ROM: edit the factory wave bank
+    buf=b; mode="rom"; base=wb+8;                      // bank starts right after the 8-byte marker
+    $("save").textContent="Patch ROM .bin";
+    $("status").innerHTML=`Loaded ROM <b>${name}</b> (${b.length>>10} KB) &mdash; factory wave bank at $${base.toString(16).toUpperCase()}. Editing the <b>NEW-song defaults</b>.`;
+  } else if(ascii(b,0,8)===SONGMAGIC){                 // a .gmdj song: edit its own 16 waves
+    if(((b[10]<<8)|b[11])!==DATA_SIZE){ $("status").innerHTML=`<b style="color:#ff6b6b">${name}: data-size mismatch</b> &mdash; built for a different version.`; return; }
+    buf=b; mode="gmdj"; base=32+WAVE_OFF;              // 32-byte container header + WAVE_OFF into the data block
+    $("save").textContent="Save .gmdj";
+    $("status").innerHTML=`Loaded song <b>${ascii(b,12,8).trim()||name}</b> &mdash; editing <b>this song's</b> 16 waves.`;
+  } else {
+    $("status").innerHTML=`<b style="color:#ff6b6b">${name}: not a genmddj ROM (no GMDJWAV0) or .gmdj song</b>.`; return;
+  }
+  $("main").style.display="block"; buildWaves(); render(); note("");
+}
+$("save").onclick=()=>{
+  if(!buf) return;                                     // waves are edited in-place by setStep
+  if(mode==="rom"){                                    // re-fix the MD checksum (sum of u16 from $200, stored at $18E)
+    let sum=0; for(let i=0x200;i+1<buf.length;i+=2) sum=(sum+((buf[i]<<8)|buf[i+1]))%0x10000;
+    buf[0x18E]=(sum>>8)&0xFF; buf[0x18F]=sum&0xFF;
+    dl(buf, fname.replace(/\.(bin|md|gen)$/i,"")+"-wave.bin");
+    note(`patched ROM (checksum $${sum.toString(16).toUpperCase().padStart(4,"0")}). Flash it.`);
+  } else {
+    dl(buf, fname.replace(/\.gmdj$/i,"")+".gmdj");
+    note("saved .gmdj.");
+  }
+};
+
+const zone=$("zone"), inp=$("file");
+async function take(f){ if(f) load(new Uint8Array(await f.arrayBuffer()), f.name); }  // capture the File before any await
+zone.onclick=()=>inp.click();
+inp.onchange=()=>{ const f=inp.files[0]; inp.value=""; take(f); };
+let _dn=0;                                            // window-level drag so a drop anywhere on the page works
+window.addEventListener("dragenter",e=>{ e.preventDefault(); _dn++; zone.classList.add("hot"); });
+window.addEventListener("dragover", e=>{ e.preventDefault(); });
+window.addEventListener("dragleave",e=>{ if(--_dn<=0){ _dn=0; zone.classList.remove("hot"); } });
+window.addEventListener("drop",     e=>{ e.preventDefault(); _dn=0; zone.classList.remove("hot"); take(e.dataTransfer.files[0]); });
+</script>
+</body>
+</html>

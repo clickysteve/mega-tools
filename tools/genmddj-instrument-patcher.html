@@ -1,0 +1,589 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>genmddj instrument patcher</title>
+<style>
+  *{ box-sizing:border-box; }
+  body{ margin:0; font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif; background:#15171c; color:#cfd6e0; }
+  header{ padding:12px 18px; border-bottom:1px solid #2a2e38; display:flex; align-items:baseline; gap:14px; flex-wrap:wrap; }
+  header h1{ font-size:17px; margin:0; }
+  header .sub{ color:#7d8595; font-size:12px; }
+  .rombar{ display:flex; gap:8px; align-items:center; padding:10px 18px; border-bottom:1px solid #2a2e38; flex-wrap:wrap; }
+  .btn{ background:#2b6cb0; color:#fff; border-radius:7px; padding:8px 14px; font-weight:600; cursor:pointer; display:inline-block; border:0; }
+  .btn:hover{ background:#3a7ec0; } .btn:disabled{ opacity:.4; cursor:not-allowed; }
+  .romstatus{ color:#9aa3b2; font-size:12px; }
+  .wrap{ display:grid; grid-template-columns:210px 1fr; gap:0; height:calc(100vh - 102px); }
+  .col{ padding:12px; overflow:auto; } .col + .col{ border-left:1px solid #2a2e38; }
+  h2{ font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#7d8595; margin:0 0 10px; }
+  /* instrument list */
+  .ilist{ display:flex; flex-direction:column; gap:3px; }
+  .ilist.drag{ outline:2px dashed #3a6ea5; outline-offset:-2px; border-radius:6px; }
+  .inst{ display:flex; align-items:center; gap:8px; padding:5px 8px; border-radius:6px; cursor:pointer; border:1px solid transparent; }
+  .inst:hover{ background:#1d212a; } .inst.sel{ background:#222838; border-color:#3a6ea5; }
+  .inst .ix{ color:#7d8595; font-size:11px; width:18px; font-family:ui-monospace,monospace; }
+  .inst .nm{ font-weight:600; font-size:13px; }
+  .inst .ty{ margin-left:auto; font-size:10px; color:#8b93a3; background:#0e1014; padding:1px 5px; border-radius:4px; }
+  /* editor */
+  .ehead{ display:flex; align-items:center; gap:12px; margin-bottom:14px; flex-wrap:wrap; }
+  .nameedit{ background:#1d212a; border:1px solid #2a2e38; color:#cfd6e0; border-radius:6px; padding:6px 9px; width:130px; font-weight:700; font-size:15px; }
+  .grid{ display:grid; gap:10px 14px; align-items:center; }
+  .hgrid{ grid-template-columns:repeat(auto-fill, minmax(96px,1fr)); margin-bottom:18px; }
+  .fld{ display:flex; flex-direction:column; gap:3px; }
+  .fld label{ font-size:11px; color:#7d8595; text-transform:uppercase; letter-spacing:.05em; }
+  input[type=number], select{ background:#1b1f27; border:1px solid #2a2e38; color:#cfd6e0; border-radius:6px; padding:5px 7px; font-family:ui-monospace,monospace; font-size:13px; width:100%; }
+  /* operator table */
+  table.ops{ border-collapse:collapse; width:100%; max-width:560px; }
+  table.ops th, table.ops td{ padding:4px 6px; text-align:center; }
+  table.ops thead th{ font-size:12px; color:#cfd6e0; border-bottom:1px solid #2a2e38; }
+  table.ops thead th .car{ display:block; font-size:9px; color:#7aff9a; font-weight:400; }
+  table.ops thead th .mod{ display:block; font-size:9px; color:#7d8595; font-weight:400; }
+  table.ops tbody th{ text-align:right; font-size:11px; color:#7d8595; font-weight:600; padding-right:10px; white-space:nowrap; }
+  table.ops td input{ width:54px; text-align:center; }
+  .pnote{ color:#7d8595; font-size:11px; margin:10px 0; max-width:560px; }
+  #drop-ov{ position:fixed; inset:0; background:rgba(21,23,28,.88); border:4px dashed #3a6ea5; display:none;
+            align-items:center; justify-content:center; z-index:100; pointer-events:none; font-size:22px; font-weight:700; color:#cfe2f5; }
+  #drop-ov.on{ display:flex; }
+  .empty{ color:#7d8595; padding:40px 0; text-align:center; }
+  .aud{ display:flex; align-items:center; gap:5px; flex-wrap:wrap; margin-bottom:16px; padding-bottom:14px; border-bottom:1px solid #2a2e38; }
+  .aud .lbl{ font-size:11px; color:#7d8595; text-transform:uppercase; letter-spacing:.05em; margin-right:4px; }
+  .key{ background:#1b1f27; border:1px solid #2a2e38; color:#cfd6e0; border-radius:5px; padding:7px 9px; font-family:ui-monospace,monospace; font-size:12px; cursor:pointer; min-width:32px; }
+  .key:hover{ background:#222838; } .key.on{ background:#2b6cb0; color:#fff; border-color:#3a7ec0; }
+  .key.stop{ background:#3a2228; border-color:#5a2a32; }
+  /* piano keyboard */
+  .kbd{ position:relative; white-space:nowrap; font-size:0; height:84px; }
+  .wk{ display:inline-block; width:20px; height:84px; background:#dfe6ee; border:1px solid #11141a; border-top:none; border-radius:0 0 4px 4px; cursor:pointer; vertical-align:top; }
+  .wk:hover{ background:#eef3f8; } .wk.on{ background:#6fa8dc; }
+  .bk{ position:absolute; top:0; width:12px; height:52px; background:#15171c; border:1px solid #000; border-radius:0 0 3px 3px; cursor:pointer; z-index:2; }
+  .bk:hover{ background:#2a2e38; } .bk.on{ background:#2b6cb0; }
+  /* sliders */
+  .sl{ display:grid; grid-template-columns:38px 1fr 28px; align-items:center; gap:8px; margin:3px 0; }
+  .sl label{ color:#7d8595; font-size:11px; }
+  .sl input[type=range]{ width:100%; }
+  .sl .v{ font-family:ui-monospace,monospace; font-size:12px; text-align:right; color:#9aa3b2; }
+  .hdrsl{ display:grid; grid-template-columns:repeat(auto-fit,minmax(160px,1fr)); gap:2px 22px; margin-bottom:16px; }
+  .opgrid{ display:grid; grid-template-columns:repeat(auto-fit,minmax(232px,1fr)); gap:12px; margin:6px 0 14px; }
+  .oppanel{ background:#1b1f27; border:1px solid #2a2e38; border-radius:8px; padding:8px 12px; }
+  .oppanel h3{ margin:0 0 6px; font-size:13px; display:flex; align-items:center; gap:8px; }
+  .oppanel h3 .car{ font-size:10px; color:#7aff9a; font-weight:400; } .oppanel h3 .mod{ font-size:10px; color:#7d8595; font-weight:400; }
+</style>
+</head>
+<body>
+<header>
+  <h1>genmddj instrument patcher</h1>
+  <span class="sub">edit 32 FM patches &middot; import Ableton Operator <code>.adv</code> / <code>.gmi</code> / <code>.tfi</code> &middot; audition &middot; save a patch or patch a ROM</span>
+</header>
+<div class="rombar">
+  <label class="btn">Load .bin&hellip;<input type="file" id="romfile" accept=".bin,.md,.gen" hidden></label>
+  <label class="btn">Import VGM&hellip;<input type="file" id="vgmfile" accept=".vgm,.vgz" hidden></label>
+  <button class="btn" id="patch" disabled>Download patched ROM</button>
+  <span class="romstatus" id="romstatus">Editing the factory bank &mdash; <b>load a patch</b> (.adv/.gmi/.tfi) into a slot, <b>Import VGM</b> to rip a game's instruments, or drop a genmddj <code>.bin</code> to patch a ROM.</span>
+</div>
+<div id="drop-ov">Drop a ROM to patch &mdash; or .gmi / .tfi / .adv patches onto the instrument list</div>
+
+<div class="wrap">
+  <div class="col"><h2>Instruments</h2><div class="ilist" id="ilist"><div class="empty">no ROM</div></div></div>
+  <div class="col" id="editor"><div class="empty">Load a ROM to edit instruments.</div></div>
+</div>
+
+<script>
+const $ = s => document.querySelector(s);
+const MAGIC=[0x47,0x4D,0x49,0x4E,0x53,0x54,0x52,0x30];  // "GMINSTR0"
+const NINSTR=32, REC=64;
+const TYPES=["FM","KIT","WAVE","TONE","NOISE","PERC"];
+const PANS=["off","R","L","L+R"];
+const OPLBL=["OP1","OP3","OP2","OP4"];                  // record-slot order = chip S1,S3,S2,S4
+const CARRIER=[0x08,0x08,0x08,0x08,0x0C,0x0E,0x0E,0x0F];// bit s set => record slot s is a carrier
+// header fields: [label, offset, max]
+const HDR=[["ALGO",1,7],["FB",2,7],["AMS",4,3],["FMS",5,7],["HLD",6,15],["VOL",7,15]];
+// per-operator params in record order: [label, byte-in-op, max]
+const OPP=[["MUL",0,15],["DT",1,7],["TL",2,127],["RS",3,3],["AR",4,31],["AM",5,1],["D1",6,31],["D2",7,31],["RR",8,15],["SL",9,15]];
+const DEFAULT_BANK="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";
+const DEFNAMES=["PIANO1","PIANO2","PIANO3","CLAV","CRYSTAL1","CRYSTAL2","BRASS1","BRASS2","BRASS3","HARPSICO","LEAD1","LEAD2","LEAD3","MARIMBA","MARIMBA2","MARIMBA3","BASS1","BASS2","BASS3","BASS4"];
+
+let rom=null, base=-1, romName='', sel=0;
+let bank=null;                                          // the 32x64 working bank (independent of a ROM)
+const off = (slot,o) => slot*REC + o;                   // offset of field o within the working bank
+const getB = (slot,o) => bank[off(slot,o)];
+const setB = (slot,o,v) => { bank[off(slot,o)] = v & 0xFF; };
+const opOff = (slot,op,p) => off(slot, 8 + op*10 + p);
+
+function readName(slot){
+  let s=''; for(let i=0;i<8;i++){ const c=bank[off(slot,54+i)]; s += c? String.fromCharCode(c):' '; }
+  s=s.replace(/\s+$/,''); return s || (DEFNAMES[slot]||('INST'+slot));
+}
+function writeName(slot,str){
+  str=(str.toUpperCase()+'        ').slice(0,8);
+  for(let i=0;i<8;i++) bank[off(slot,54+i)] = str.charCodeAt(i)&0x7F;
+}
+
+function findMagic(u8){ outer:for(let i=0;i+8<=u8.length;i++){ for(let j=0;j<8;j++) if(u8[i+j]!==MAGIC[j]) continue outer; return i+8; } return -1; }
+
+function loadRom(f){
+  if(!f) return; romName=f.name;
+  const r=new FileReader();
+  r.onload=()=>{
+    rom=new Uint8Array(r.result); base=findMagic(rom);
+    if(base<0){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${romName}: GMINSTR0 not found</b> — is this a genmddj ROM?`; $("#patch").disabled=true; rom=null; return; }
+    bank.set(rom.subarray(base, base+NINSTR*REC));      // pull the ROM bank into the working set
+    $("#romstatus").innerHTML=`Loaded <b>${romName}</b> (${rom.length>>10} KB) — bank at $${base.toString(16).toUpperCase()}. Edit, then download.`;
+    $("#patch").disabled=false; sel=0; renderList(); renderEditor();
+  };
+  r.readAsArrayBuffer(f);
+}
+
+async function gunzipBytes(d){ const s=new Blob([d]).stream().pipeThrough(new DecompressionStream('gzip')); return new Uint8Array(await new Response(s).arrayBuffer()); }
+
+// VGM -> YM2612 patch ripper: shadow the registers, snapshot every key-on, dedupe + rank by play count.
+// Our record's op-slot order IS the chip register order, so each operator copies verbatim.
+function extractVGMPatches(d){
+  const vu32=p=>(d[p]|(d[p+1]<<8)|(d[p+2]<<16)|(d[p+3]<<24))>>>0;
+  if(!(d[0]==0x56&&d[1]==0x67&&d[2]==0x6D&&d[3]==0x20)) throw new Error("not a VGM (bad magic)");
+  const version=vu32(8); let dataStart=0x40;
+  if(version>=0x150){ const rel=vu32(0x34); if(rel) dataStart=0x34+rel; }
+  const ym2612clock=vu32(0x2C), eof=vu32(4)+4, end=Math.min(eof||d.length, d.length);
+  const reg=[new Uint8Array(256),new Uint8Array(256)], prevMask=[0,0,0,0,0,0], patches=new Map();
+  const snap=(port,ch)=>{
+    const b0=reg[port][0xB0+ch], b4=reg[port][0xB4+ch], rec=new Uint8Array(64);
+    rec[1]=b0&7; rec[2]=(b0>>3)&7; rec[3]=(((b4>>7)&1)<<1)|((b4>>6)&1); rec[4]=(b4>>4)&3; rec[5]=b4&7;
+    rec[6]=15; rec[7]=15; let silent=true;
+    for(let s=0;s<4;s++){ const a=s*4+ch, o=8+s*10;
+      const r30=reg[port][0x30+a],r40=reg[port][0x40+a],r50=reg[port][0x50+a],r60=reg[port][0x60+a],r70=reg[port][0x70+a],r80=reg[port][0x80+a];
+      rec[o]=r30&15; rec[o+1]=(r30>>4)&7; rec[o+2]=r40&127; rec[o+3]=(r50>>6)&3; rec[o+4]=r50&31;
+      rec[o+5]=(r60>>7)&1; rec[o+6]=r60&31; rec[o+7]=r70&31; rec[o+8]=r80&15; rec[o+9]=(r80>>4)&15;
+      if(rec[o+2]<127 && rec[o+4]>0) silent=false; }
+    if(silent) return; rec[48]=0xFF;                          // skip dead channels; i_tbl = none
+    const fp=Array.from(rec.subarray(1,48)).join(','), e=patches.get(fp);
+    if(e) e.count++; else patches.set(fp,{rec,count:1});
+  };
+  let p=dataStart;
+  while(p<end){ const c=d[p++];
+    if(c==0x52||c==0x53){ const a=d[p++],v=d[p++]; reg[c-0x52][a]=v;
+      if(c==0x52 && a==0x28){ const low=v&7,mask=v&0xF0; let port,ch; if(low<4){port=0;ch=low;}else{port=1;ch=low-4;}
+        const idx=port*3+ch; if(mask && !prevMask[idx]) snap(port,ch); prevMask[idx]=mask; } }
+    else if(c==0x50||c==0x4F) p+=1;
+    else if(c==0x51||(c>=0x54&&c<=0x5F)) p+=2;
+    else if(c==0x61) p+=2;
+    else if(c==0x62||c==0x63){}
+    else if(c==0x66) break;
+    else if(c==0x67){ p+=6+vu32(p+2); }                       // data block: 0x66 tt ssss + size bytes
+    else if(c>=0x70&&c<=0x8F){}                                // 0x7n wait, 0x8n DAC+wait
+    else if(c==0x90||c==0x91||c==0x95) p+=4;
+    else if(c==0x92) p+=5; else if(c==0x93) p+=10; else if(c==0x94) p+=1;
+    else if(c==0xA0||(c>=0xB0&&c<=0xBF)) p+=2;
+    else if(c>=0xC0&&c<=0xDF) p+=3;
+    else if(c==0xE0||c==0xE1) p+=4;
+    else break;                                               // unknown -> stop (don't desync)
+  }
+  return {version,ym2612clock,patches:[...patches.values()].sort((a,b)=>b.count-a.count)};
+}
+
+async function importVGM(f){
+  if(!f) return;
+  let d=new Uint8Array(await f.arrayBuffer());
+  if(d[0]===0x1f && d[1]===0x8b){ try{ d=await gunzipBytes(d); }catch(e){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${f.name}: gunzip failed</b>`; return; } }
+  let res; try{ res=extractVGMPatches(d); }
+  catch(e){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${f.name}: ${e.message}</b>`; return; }
+  if(!res.ym2612clock){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${f.name}: no YM2612 clock in the header (not a Mega Drive VGM?)</b>`; return; }
+  const pats=res.patches;
+  if(!pats.length){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${f.name}: no FM key-ons found</b>`; return; }
+  const n=Math.min(NINSTR, pats.length);
+  for(let i=0;i<n;i++){ bank.set(pats[i].rec, i*REC); writeName(i, 'VGM'+i.toString().padStart(2,'0')); }
+  sel=0;
+  $("#romstatus").innerHTML=`Ripped <b>${f.name}</b>: <b>${pats.length}</b> unique FM patch${pats.length===1?'':'es'}, loaded the top ${n} (ranked by play count). Audition, rename, export each as .gmi.`;
+  renderList(); renderEditor();
+}
+
+function renderList(){
+  const el=$("#ilist"); el.innerHTML='';
+  for(let i=0;i<NINSTR;i++){
+    const d=document.createElement('div'); d.className='inst'+(i===sel?' sel':''); d.dataset.slot=i;
+    d.innerHTML=`<span class="ix">${i.toString(16).toUpperCase().padStart(2,'0')}</span><span class="nm">${readName(i)}</span><span class="ty">${TYPES[getB(i,0)]||'?'} A${getB(i,1)}</span>`;
+    d.onclick=()=>{ sel=i; renderList(); renderEditor(); };
+    el.appendChild(d);
+  }
+}
+
+// a labelled slider; optional disp(v)->text and store(v)->byte for special fields
+function slider(label,val,min,max,oninput,disp,store){
+  disp=disp||(x=>x); store=store||(x=>x);
+  const row=document.createElement('div'); row.className='sl';
+  row.innerHTML=`<label>${label}</label><input type="range" min="${min}" max="${max}" value="${val}"><span class="v">${disp(val)}</span>`;
+  const inp=row.querySelector('input'), v=row.querySelector('.v');
+  inp.oninput=()=>{ const n=+inp.value; v.textContent=disp(n); oninput(store(n)); };
+  return row;
+}
+// 6-octave clickable piano (C1..C7); click a key to audition the current patch at that pitch
+function buildKeyboard(){
+  const wrap=document.createElement('div'); wrap.className='kbd';
+  const WW=20, BW=12, OCT=6, START=24, white=[0,2,4,5,7,9,11], blackAfter={0:1,1:3,3:6,4:8,5:10};
+  for(let o=0;o<OCT;o++) for(let k=0;k<7;k++){ const midi=START+o*12+white[k];
+    const w=document.createElement('div'); w.className='wk'; w.onclick=()=>play(sel,midi,w); wrap.appendChild(w); }
+  { const midi=START+OCT*12, w=document.createElement('div'); w.className='wk'; w.onclick=()=>play(sel,midi,w); wrap.appendChild(w); }
+  for(let o=0;o<OCT;o++) for(const k in blackAfter){ const gi=o*7+(+k), midi=START+o*12+blackAfter[k];
+    const b=document.createElement('div'); b.className='bk'; b.style.left=((gi+1)*WW-BW/2)+'px'; b.onclick=()=>play(sel,midi,b); wrap.appendChild(b); }
+  return wrap;
+}
+
+function renderEditor(){
+  stopAudition();
+  const el=$("#editor"); el.innerHTML='';
+  // name + type + pan
+  const head=document.createElement('div'); head.className='ehead';
+  const nm=document.createElement('input'); nm.className='nameedit'; nm.maxLength=8; nm.value=readName(sel);
+  nm.oninput=()=>{ writeName(sel,nm.value); renderList(); };
+  head.appendChild(nm);
+  const mksel=(label,opts,val,cb)=>{ const f=document.createElement('div'); f.className='fld';
+    f.innerHTML=`<label>${label}</label>`; const s=document.createElement('select');
+    opts.forEach((o,i)=>{ const op=document.createElement('option'); op.value=i; op.textContent=o; if(i===val)op.selected=true; s.appendChild(op); });
+    s.onchange=()=>{ cb(+s.value); renderList(); }; f.appendChild(s); return f; };
+  head.appendChild(mksel('TYPE',TYPES,getB(sel,0),v=>setB(sel,0,v)));
+  head.appendChild(mksel('PAN',PANS,getB(sel,3),v=>setB(sel,3,v)));
+  // load one or more patches (.gmi native, lossless; also imports .tfi/.vgi/.adv). Multi-select -> consecutive slots.
+  const lb=document.createElement('label'); lb.className='key'; lb.style.cursor='pointer'; lb.textContent='load patches…';
+  lb.title='load one or more .gmi/.tfi/.vgi/.adv into this slot and the ones after';
+  const fi=document.createElement('input'); fi.type='file'; fi.accept='.gmi,.tfi,.vgi,.adv'; fi.multiple=true; fi.hidden=true;
+  fi.onchange=e=>{ const f=e.target.files; if(f.length===1) importPatch(f[0]); else dropPatches(f, sel); fi.value=''; }; lb.appendChild(fi); head.appendChild(lb);
+  const sg=document.createElement('button'); sg.className='key'; sg.textContent='save .gmi'; sg.title='save this patch (genmddj native, lossless)'; sg.onclick=exportInst; head.appendChild(sg);
+  const st=document.createElement('button'); st.className='key'; st.textContent='.tfi'; st.title='export TFI for other YM2612 tools'; st.onclick=exportTfi; head.appendChild(st);
+  const sa=document.createElement('button'); sa.className='key'; sa.textContent='.adv'; sa.title='export an Ableton Operator preset'; sa.onclick=exportAdv; head.appendChild(sa);
+  el.appendChild(head);
+
+  // audition piano — click a key to play the (live-edited) patch at that pitch
+  const aud=document.createElement('div'); aud.className='aud';
+  aud.appendChild(buildKeyboard());
+  const sb=document.createElement('button'); sb.className='key stop'; sb.textContent='■'; sb.title='stop'; sb.onclick=()=>stopAudition(); aud.appendChild(sb);
+  el.appendChild(aud);
+
+  const badges=[];
+  function updateBadges(algo){ const cm=CARRIER[algo&7]||0; badges.forEach((bd,s)=>{ const c=(cm>>s)&1; bd.className=c?'car':'mod'; bd.textContent=c?'carrier':'mod'; }); }
+  // voice params as sliders: ALGO / FB / AMS / FMS / HLD / VOL
+  const hg=document.createElement('div'); hg.className='hdrsl';
+  hg.appendChild(slider('ALGO',getB(sel,1),0,7,v=>{ setB(sel,1,v); updateBadges(v); renderList(); }));
+  [['FB',2,7],['AMS',4,3],['FMS',5,7],['HLD',6,15],['VOL',7,15]].forEach(([l,o,mx])=> hg.appendChild(slider(l,getB(sel,o),0,mx,v=>setB(sel,o,v))));
+  // pitch sweep (the FM-kick swoop): byte 62 = hi nibble depth (x4 semis, downward) | lo nibble rate
+  hg.appendChild(slider('P.SWEEP', getB(sel,62)>>4, 0,15, v=>setB(sel,62,(v<<4)|(getB(sel,62)&15)), v=>(v*4)+'st'));
+  hg.appendChild(slider('P.RATE',  getB(sel,62)&15, 0,15, v=>setB(sel,62,(getB(sel,62)&0xF0)|v)));
+  el.appendChild(hg);
+
+  // operator panels (sliders), carrier/mod badge per panel from ALGO
+  const og=document.createElement('div'); og.className='opgrid';
+  const cmask=CARRIER[getB(sel,1)&7]||0;
+  OPLBL.forEach((lbl,s)=>{ const b=8+s*10;
+    const p=document.createElement('div'); p.className='oppanel';
+    const h=document.createElement('h3'); h.innerHTML=`<span>${lbl}</span>`;
+    const car=(cmask>>s)&1, bd=document.createElement('span'); bd.className=car?'car':'mod'; bd.textContent=car?'carrier':'mod'; badges[s]=bd; h.appendChild(bd);
+    p.appendChild(h);
+    OPP.forEach(([l,po,mx])=> p.appendChild(slider(l,getB(sel,b+po),0,mx,v=>setB(sel,b+po,v))));
+    og.appendChild(p);
+  });
+  el.appendChild(og);
+
+  el.insertAdjacentHTML('beforeend','<div class="pnote">TL 0 = loudest, 127 = silent. Carriers are audible; modulators set brightness. Panels are in chip slot order (OP1, OP3, OP2, OP4), matching the console FM screen.</div>');
+
+  // extras: macro table / table speed / transpose
+  const ex=document.createElement('div'); ex.className='hdrsl';
+  const t=getB(sel,48); ex.appendChild(slider('TABLE',(t>31?32:t),0,32,v=>setB(sel,48,v),v=>v>31?'--':v,v=>v>31?255:v));
+  ex.appendChild(slider('TBL.SPD',getB(sel,49),0,15,v=>setB(sel,49,v)));
+  const tsp=getB(sel,53); ex.appendChild(slider('TRANSPOSE',tsp>127?tsp-256:tsp,-24,24,v=>setB(sel,53,v)));
+  el.appendChild(ex);
+}
+
+// ---- YM2612 patch audition (register-level OPN2 core) -----------------------
+// Same approach as the SMS tool's emu2413 port: the real Yamaha log-sin / exp operator
+// math + the OPN2 envelope generator (rate tables + concave attack), rendered offline at
+// the chip rate and resampled by Web Audio. Models the 8 algorithms, OP1 feedback, MUL
+// ratios and per-op AR/D1R/D2R/RR/SL/TL/RS. (DT detune is approximated; the global LFO and
+// SSG-EG are not modelled. The real YM2612 / Emulicious still has the final word on tone.)
+const CHIPRATE=53267;                                 // NTSC YM2612 FM sample rate (clock/144)
+const SLOTOF=[0,2,1,3];                               // logical OP1,OP2,OP3,OP4 -> record slot
+const MULT=[0.5,1,2,3,4,5,6,7,8,9,10,11,12,13,14,15];
+// per algorithm: modulators feeding each logical op (idx 0..3), and the carrier set
+const ALG=[
+ {m:[[],[0],[1],[2]],  c:[3]},        // 0  1>2>3>4
+ {m:[[],[],[0,1],[2]], c:[3]},        // 1  (1+2)>3>4
+ {m:[[],[],[1],[0,2]], c:[3]},        // 2  2>3, (1+3)>4
+ {m:[[],[0],[],[1,2]], c:[3]},        // 3  1>2, (2+3)>4
+ {m:[[],[0],[],[2]],   c:[1,3]},      // 4  1>2, 3>4
+ {m:[[],[0],[0],[0]],  c:[1,2,3]},    // 5  1>(2,3,4)
+ {m:[[],[0],[],[]],    c:[1,2,3]},    // 6  1>2; 3,4 free
+ {m:[[],[],[],[]],     c:[0,1,2,3]},  // 7  additive
+];
+// Yamaha log-sin + exp (dB->linear) tables, after emu2413 (Mitsutaka Okazaki, MIT)
+const EXP_T=new Int32Array(256);
+for(let x=0;x<256;x++) EXP_T[x]=Math.round((Math.pow(2,x/256)-1)*1024);
+const SINLOG=new Int32Array(1024);
+for(let x=0;x<256;x++) SINLOG[x]=Math.round(-Math.log2(Math.sin((x+0.5)*Math.PI/512))*256);
+for(let x=0;x<256;x++) SINLOG[256+x]=SINLOG[255-x];
+for(let x=0;x<512;x++) SINLOG[512+x]=0x8000|SINLOG[x];
+function lookupExp(i){ const t=EXP_T[(i&0xff)^0xff]+1024; const r=t>>((i&0x7f00)>>8); return ((i&0x8000)?~r:r)<<1; }
+// OPN2 EG increment table (19 rows x 8 steps); row/shift derived from the effective rate
+const EG_INC=[
+ 0,1,0,1,0,1,0,1, 0,1,0,1,1,1,0,1, 0,1,1,1,0,1,1,1, 0,1,1,1,1,1,1,1,   // rs 0..11, rate&3
+ 1,1,1,1,1,1,1,1, 1,1,1,2,1,1,1,2, 1,2,1,2,1,2,1,2, 1,2,2,2,1,2,2,2,   // rs 12
+ 2,2,2,2,2,2,2,2, 2,2,2,4,2,2,2,4, 2,4,2,4,2,4,2,4, 2,4,4,4,2,4,4,4,   // rs 13
+ 4,4,4,4,4,4,4,4, 4,4,4,8,4,4,4,8, 4,8,4,8,4,8,4,8, 4,8,8,8,4,8,8,8,   // rs 14
+ 8,8,8,8,8,8,8,8, 16,16,16,16,16,16,16,16, 0,0,0,0,0,0,0,0             // rs15 dec, rs15 att, infinity
+];
+const ATT=0,DEC=1,SUS=2,REL=3;
+function setState(o,st){
+  o.state=st;
+  const reg = st===ATT?o.AR : st===DEC?o.D1 : st===SUS?o.D2 : o.RR;
+  o.regrate=reg;
+  if(reg===0){ o.row=18; o.shift=0; return; }        // register rate 0 = never moves
+  const R=Math.min(63, 2*reg + o.ksr), rs=R>>2, rl=R&3;
+  if(rs<=11){ o.row=rl; o.shift=11-rs; }
+  else if(rs===12){ o.row=4+rl; o.shift=0; }
+  else if(rs===13){ o.row=8+rl; o.shift=0; }
+  else if(rs===14){ o.row=12+rl; o.shift=0; }
+  else { o.row=(st===ATT)?17:16; o.shift=0; }        // rs 15
+}
+function egStep(o,cnt){
+  if(o.regrate===0) return;
+  if((cnt & ((1<<o.shift)-1))!==0) return;
+  const inc=EG_INC[o.row*8 + ((cnt>>o.shift)&7)];
+  if(o.state===ATT){ o.vol += (~o.vol*inc)>>4; if(o.vol<=0){ o.vol=0; setState(o,DEC); } }   // concave attack
+  else { o.vol += inc;
+    if(o.state===DEC){ if(o.vol>=o.sl){ o.vol=o.sl; setState(o,SUS); } }
+    else if(o.vol>=1023){ o.vol=1023; } }
+}
+function patchFromRom(s){
+  const ops=SLOTOF.map(rs=>{ const b=8+rs*10; return {
+    MUL:getB(s,b),DT:getB(s,b+1),TL:getB(s,b+2),RS:getB(s,b+3),AR:getB(s,b+4),D1:getB(s,b+6),D2:getB(s,b+7),RR:getB(s,b+8),SL:getB(s,b+9) }; });
+  return { algo:getB(s,1)&7, fb:getB(s,2)&7, vol:getB(s,7)&15, psweep:getB(s,62), ops };
+}
+function makeOp(o,freq,kc){
+  const mul=(o.MUL===0)?0.5:o.MUL, sign=(o.DT&4)?-1:1, det=1+sign*(o.DT&3)*0.0007;
+  const inc0=freq*mul*det/CHIPRATE*1024;
+  const op={ inc:inc0, baseInc:inc0, phase:0, tlatt:o.TL<<5,
+    AR:o.AR, D1:o.D1, D2:o.D2, RR:o.RR*2+1, ksr:(kc>>(3-(o.RS&3))),     // RR 4-bit -> 5-bit; ksr = kc>>(3-RS)
+    sl:((o.SL>=15)?31:o.SL)*32, vol:1023, state:ATT, row:18, shift:0, prev1:0, prev2:0 };
+  setState(op,ATT); return op;
+}
+function renderVoice(p,freq){
+  const A=ALG[p.algo], n=Math.floor(1.9*CHIPRATE), koff=Math.floor(1.3*CHIPRATE);
+  const block=Math.max(0,Math.min(7,Math.round(Math.log2(freq/16.35)))), kc=Math.min(31,block*4+1);
+  const ops=p.ops.map(o=>makeOp(o,freq,kc));
+  const fbsh=p.fb?(9-p.fb):0, vg=Math.max(0.1,p.vol/15);
+  const buf=new Float32Array(n); let cnt=0, sub=0;
+  const swDep=(p.psweep>>4)*4, swRate=p.psweep&15; let swOff=swDep;   // pitch sweep: depth (semis) decays by rate/tick
+  const TICK=(CHIPRATE/60)|0;                                          // one engine tick ~ one 60 Hz frame
+  for(let s=0;s<n;s++){
+    if(p.psweep && (s%TICK)===0){                                     // each tick: bend the pitch, then decay
+      const pm=Math.pow(2, swOff/12); for(const o of ops) o.inc=o.baseInc*pm;
+      if(swOff>0) swOff=Math.max(0, swOff-swRate);
+    }
+    if(s===koff){ for(const o of ops) setState(o,REL); }    // key-off
+    if(++sub>=3){ sub=0; cnt=(cnt+1)>>>0; for(const o of ops) egStep(o,cnt); }   // EG ticks /3
+    const outs=[0,0,0,0];
+    for(let k=0;k<4;k++){ const o=ops[k]; let mod=0;
+      if(k===0){ if(p.fb) mod=(o.prev1+o.prev2)>>fbsh; }    // OP1 self-feedback
+      else { for(const mi of A.m[k]) mod+=outs[mi]; }       // modulator phase input
+      o.phase=(o.phase+o.inc)%1024; const idx=((o.phase|0)+mod)&1023;
+      const out=(o.vol>=1023)?0:lookupExp(SINLOG[idx]+(o.vol<<2)+o.tlatt);
+      o.prev2=o.prev1; o.prev1=out; outs[k]=out;
+    }
+    let y=0; for(const c of A.c) y+=outs[c];
+    buf[s]=Math.tanh(y/9000)*vg;
+  }
+  const fd=Math.min(800,n); for(let i=0;i<fd;i++) buf[n-1-i]*=i/fd;     // de-click tail
+  return buf;
+}
+let actx=null, voice=null;
+const noteFreq=m=>440*Math.pow(2,(m-69)/12);
+function stopAudition(){ if(!voice) return; try{ voice.src.stop(); }catch(e){} if(voice.btn) voice.btn.classList.remove('on'); voice=null; }
+function play(slot,midi,btn){
+  if(!bank) return;
+  if(!actx) actx=new (window.AudioContext||window.webkitAudioContext)();
+  actx.resume(); stopAudition();
+  const data=renderVoice(patchFromRom(slot), noteFreq(midi));
+  const ab=actx.createBuffer(1,data.length,CHIPRATE); ab.copyToChannel(data,0);   // Web Audio resamples
+  const src=actx.createBufferSource(); src.buffer=ab; src.connect(actx.destination);
+  src.onended=()=>{ if(voice && voice.src===src) stopAudition(); };
+  src.start(); if(btn) btn.classList.add('on'); voice={src,btn};
+}
+
+// ---- single-instrument patch files -----------------------------------------
+// Native genmddj format (.gmi): "GMDJINS1" + the verbatim 64-byte record — lossless,
+// keeps name, pan, AMS/FMS, HLD, VOL, table + transpose. Also imports TFI (42 B) / VGI
+// (43 B) from the wider YM2612 ecosystem (lossy: only algo/fb + the 4 operators; AM and
+// SSG-EG are dropped, the genmddj-only fields default).
+const NATMAGIC="GMDJINS1";
+function dl(d,name){ const u=URL.createObjectURL(new Blob([d],{type:'application/octet-stream'})); const a=document.createElement('a'); a.href=u; a.download=name; a.click(); URL.revokeObjectURL(u); }
+// parse one patch file's bytes into `slot`; returns true on success (no UI side effects)
+async function loadPatchInto(d, f, slot){
+  if((d[0]===0x1f&&d[1]===0x8b) || d[0]===0x3c){                  // gzip or '<' = Ableton Operator .adv (XML)
+    let rec; try{ const xml = d[0]===0x1f ? await gunzip(d) : new TextDecoder().decode(d); rec=advToRecord(xml); }
+    catch(e){ return false; }
+    for(let i=0;i<64;i++) bank[off(slot,i)]=rec[i];
+    writeName(slot, f.name.replace(/\.adv$/i,'')); return true;
+  }
+  const isNat = d.length===8+64 && NATMAGIC.split('').every((c,i)=>d[i]===c.charCodeAt(0));
+  if(isNat){ for(let i=0;i<64;i++) bank[off(slot,i)]=d[8+i]; return true; }   // .gmi: verbatim record (incl. name)
+  if(d.length===42 || d.length===43){                            // TFI (42) / VGI (43)
+    const opbase = d.length===43?3:2;                            // VGI byte 2 = pan/ams/fms (skipped)
+    setB(slot,0,0); setB(slot,1,d[0]&7); setB(slot,2,d[1]&7);     // FM type, algo, feedback
+    for(let i=0;i<4;i++){ const o=opbase+i*10, b=8+SLOTOF[i]*10;  // ops: MUL DT TL RS AR DR SR RR SL SSG
+      bank[off(slot,b)]=d[o]&15;   bank[off(slot,b+1)]=d[o+1]&7;  bank[off(slot,b+2)]=d[o+2]&127; bank[off(slot,b+3)]=d[o+3]&3;
+      bank[off(slot,b+4)]=d[o+4]&31; bank[off(slot,b+5)]=0;       bank[off(slot,b+6)]=d[o+5]&31;  bank[off(slot,b+7)]=d[o+6]&31;
+      bank[off(slot,b+8)]=d[o+7]&15; bank[off(slot,b+9)]=d[o+8]&15; }
+    writeName(slot, f.name.replace(/\.(tfi|vgi)$/i,'')); return true;
+  }
+  return false;
+}
+async function importPatch(f){                                   // single file -> the selected slot
+  if(!f||!bank) return;
+  const d=new Uint8Array(await f.arrayBuffer());
+  if(await loadPatchInto(d,f,sel)){
+    $("#romstatus").innerHTML=`Imported <b>${f.name}</b> into slot ${sel} (${readName(sel)}). Audition, then export/patch.`;
+    renderList(); renderEditor();
+  } else $("#romstatus").innerHTML=`<b style="color:#ff8a8a">${f.name}: not a recognised patch</b> — expected .gmi (72 B), .tfi (42), .vgi (43) or Operator .adv`;
+}
+async function dropPatches(files, start){                        // one or more files -> consecutive slots from `start`
+  if(!bank) return;
+  const list=[...files].filter(f=>/\.(gmi|tfi|vgi|adv)$/i.test(f.name)).sort((a,b)=>a.name.localeCompare(b.name));
+  if(!list.length){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">No .gmi/.tfi/.vgi/.adv files in that drop</b>`; return; }
+  let slot=Math.max(0,Math.min(start, NINSTR-1)), first=slot, done=0;
+  for(const f of list){ if(slot>=NINSTR) break; const d=new Uint8Array(await f.arrayBuffer()); if(await loadPatchInto(d,f,slot)){ slot++; done++; } }
+  sel=first;
+  $("#romstatus").innerHTML=`Loaded <b>${done}</b> patch${done===1?'':'es'} into slot${done===1?' '+first:'s '+first+'–'+(slot-1)}.`;
+  renderList(); renderEditor();
+}
+function exportInst(){                                              // native .gmi (lossless)
+  if(!bank) return;
+  const d=new Uint8Array(8+64); for(let i=0;i<8;i++) d[i]=NATMAGIC.charCodeAt(i);
+  for(let i=0;i<64;i++) d[8+i]=getB(sel,i);
+  dl(d, (readName(sel).toLowerCase().replace(/[^a-z0-9]/g,'')||('inst'+sel))+'.gmi');
+}
+function exportTfi(){                                               // interop .tfi (algo/fb + 4 ops)
+  if(!bank) return;
+  const d=new Uint8Array(42); d[0]=getB(sel,1)&7; d[1]=getB(sel,2)&7;
+  for(let i=0;i<4;i++){ const o=2+i*10, b=8+SLOTOF[i]*10;
+    d[o]=getB(sel,b); d[o+1]=getB(sel,b+1); d[o+2]=getB(sel,b+2); d[o+3]=getB(sel,b+3); d[o+4]=getB(sel,b+4);
+    d[o+5]=getB(sel,b+6); d[o+6]=getB(sel,b+7); d[o+7]=getB(sel,b+8); d[o+8]=getB(sel,b+9); d[o+9]=0; }
+  dl(d, (readName(sel).toLowerCase().replace(/[^a-z0-9]/g,'')||('inst'+sel))+'.tfi');
+}
+
+// ---- Ableton Operator (.adv) -> YM2612 --------------------------------------
+// Operator is a 4-op FM synth; we map oscillators A-D, the algorithm, levels (dB),
+// frequency ratios and ADSR envelopes (times in ms -> chip rates via the EG curve).
+// Non-sine waves, filter, LFO and pitch-env are ignored (sine FM only). .adv is plain
+// or gzipped XML. Decay/release times are scaled (DECF) to match Operator's curve.
+const DECF=1.5;
+function egRS(reg,att){ if(reg===0)return[18,0]; const R=Math.min(63,2*reg),g=R>>2,l=R&3; if(g<=11)return[l,11-g]; if(g===12)return[4+l,0]; if(g===13)return[8+l,0]; if(g===14)return[12+l,0]; return[att?17:16,0]; }
+function calAtk(AR){ if(AR===0)return 1e9; let v=1023,c=0,s=0,n=0;const[row,sh]=egRS(AR,true); while(v>0&&n<CHIPRATE*15){n++;if(++s>=3){s=0;c++;if((c&((1<<sh)-1))===0)v+=(~v*EG_INC[row*8+((c>>sh)&7)])>>4;}} return n/CHIPRATE; }
+function calDec(reg){ if(reg===0)return 1e9; let v=0,c=0,s=0,n=0;const[row,sh]=egRS(reg,false); while(v<1020&&n<CHIPRATE*60){n++;if(++s>=3){s=0;c++;if((c&((1<<sh)-1))===0)v+=EG_INC[row*8+((c>>sh)&7)];}} return n/CHIPRATE; }
+const ATKTAB=[...Array(32)].map((_,r)=>calAtk(r)), DECTAB=[...Array(32)].map((_,r)=>calDec(r));
+const t2r=(sec,tab)=>{let b=1,bd=1e9;for(let r=1;r<32;r++){if(!isFinite(tab[r]))continue;const d=Math.abs(Math.log(tab[r]+1e-5)-Math.log(sec+1e-5));if(d<bd){bd=d;b=r;}}return b;};
+const ampDb=v=>{v=parseFloat(v); return (!v||v<=0.0004)?-999:20*Math.log10(v);};
+const dbTL=db=>Math.max(0,Math.min(127,Math.round(-db/0.75)));
+const dbSL=db=>db<=-90?15:Math.max(0,Math.min(15,Math.round(-db/3)));
+// Operator algorithm -> { ym: YM2612 algo, perm:[opForA,opForB,opForC,opForD] as YM2612 op 0..3 }.
+// VERIFIED: algo 0 (series D->C->B->A, A carrier). Others best-effort until validated per patch.
+const OPALG={0:{ym:0,perm:[3,2,1,0]}, 1:{ym:1,perm:[3,2,1,0]}, 2:{ym:2,perm:[3,2,1,0]}, 3:{ym:3,perm:[3,1,0,2]},
+              7:{ym:4,perm:[1,0,3,2]}, 8:{ym:5,perm:[1,2,3,0]}, 9:{ym:6,perm:[2,3,1,0]}, 10:{ym:7,perm:[0,1,2,3]}};
+async function gunzip(d){ const s=new Blob([d]).stream().pipeThrough(new DecompressionStream('gzip')); return new TextDecoder().decode(await new Response(s).arrayBuffer()); }
+function mval(el,tag){ if(!el)return null; const t=el.getElementsByTagName(tag)[0]; if(!t)return null; const m=t.getElementsByTagName('Manual')[0]; return (m||t).getAttribute('Value'); }
+function advToRecord(xml){
+  const doc=new DOMParser().parseFromString(xml,'text/xml');
+  if(!doc.getElementsByTagName('Operator')[0]) throw new Error('not an Operator preset');
+  const osc=[]; for(let n=0;n<4;n++){ const o=doc.getElementsByTagName('Operator.'+n)[0]; if(!o){osc.push(null);continue;}
+    const tune=o.getElementsByTagName('Tune')[0], env=o.getElementsByTagName('Envelope')[0];
+    osc.push({ on:(mval(o,'IsOn')||'true')!=='false', fb:parseFloat(mval(o,'Feedback')||'0'),
+      coarse:Math.round(parseFloat(mval(tune,'Coarse')||'1')), volDb:ampDb(mval(o,'Volume')||'1'),
+      atk:parseFloat(mval(env,'AttackTime')||'0.1')/1000, dec:parseFloat(mval(env,'DecayTime')||'1')/1000,
+      sus:ampDb(mval(env,'SustainLevel')||'1'), rel:parseFloat(mval(env,'ReleaseTime')||'400')/1000 }); }
+  const g=doc.getElementsByTagName('Globals')[0];
+  const alg=OPALG[Math.round(parseFloat((g&&mval(g,'Algorithm'))||'0'))]||OPALG[0];
+  const rec=new Uint8Array(64); rec[1]=alg.ym; rec[3]=3; rec[6]=15; rec[7]=15; rec[48]=0xFF; rec[49]=1;
+  let fb=0; for(let a=0;a<4;a++) if(osc[a]&&alg.perm[a]===0) fb=osc[a].fb;       // FB op = whoever maps to OP1
+  rec[2]=Math.max(0,Math.min(7,Math.round(fb/100*7)));
+  for(let a=0;a<4;a++){ const o=osc[a]; if(!o) continue;
+    const slot=SLOTOF[alg.perm[a]], b=8+slot*10;                                 // A..D -> YM op -> record slot
+    const SL=dbSL(o.sus), slatt=(SL>=15?1020:SL*32), D1=(!o.on||slatt<16)?31:t2r(o.dec*DECF*1020/slatt,DECTAB);
+    rec[b]=Math.max(0,Math.min(15,o.coarse)); rec[b+2]=o.on?dbTL(o.volDb):127; rec[b+4]=o.on?t2r(o.atk,ATKTAB):0;
+    rec[b+6]=D1; rec[b+8]=Math.max(0,Math.min(15,Math.round((t2r(o.rel*DECF,DECTAB)-1)/2))); rec[b+9]=SL;
+  }
+  return rec;
+}
+
+// ---- YM2612 -> Ableton Operator (.adv) export -------------------------------
+// Templated from a real Operator preset: swap the 4 oscillators + algorithm and turn the
+// filter/LFO off, so the output is a valid Operator device. Reverse of the import mapping.
+const ADVTMPL="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";
+async function gzipStr(str){ const st=new Blob([str]).stream().pipeThrough(new CompressionStream('gzip')); return new Uint8Array(await new Response(st).arrayBuffer()); }
+function setM(el,tag,val){ const t=el&&el.getElementsByTagName(tag)[0]; if(t){ (t.getElementsByTagName('Manual')[0]||t).setAttribute('Value', String(val)); } }
+const REVALG={0:{op:0,perm:[3,2,1,0]}, 1:{op:1,perm:[3,2,1,0]}, 2:{op:2,perm:[3,2,1,0]}, 3:{op:3,perm:[3,1,0,2]},
+               4:{op:7,perm:[1,0,3,2]}, 5:{op:8,perm:[1,2,3,0]}, 6:{op:9,perm:[2,3,1,0]}, 7:{op:10,perm:[0,1,2,3]}};
+async function recordToAdv(slot){
+  const doc=new DOMParser().parseFromString(await gunzip(Uint8Array.from(atob(ADVTMPL),c=>c.charCodeAt(0))),'text/xml');
+  const filt=doc.getElementsByTagName('Filter')[0]; if(filt) setM(filt,'OnOff','false');
+  const ra=REVALG[getB(slot,1)&7]||REVALG[0];
+  setM(doc.getElementsByTagName('Globals')[0],'Algorithm', ra.op);
+  const fbReg=getB(slot,2)&7;
+  for(let a=0;a<4;a++){ const o=doc.getElementsByTagName('Operator.'+a)[0]; if(!o) continue;
+    const ymOp=ra.perm[a], rb=8+SLOTOF[ymOp]*10;
+    const MUL=getB(slot,rb),TL=getB(slot,rb+2),AR=getB(slot,rb+4),D1=getB(slot,rb+6),RR=getB(slot,rb+8),SL=getB(slot,rb+9);
+    const on=TL<127, tune=o.getElementsByTagName('Tune')[0], env=o.getElementsByTagName('Envelope')[0], slatt=(SL>=15?1020:SL*32);
+    setM(o,'IsOn', on?'true':'false'); setM(o,'WaveForm',0); setM(o,'LfoOn','false');
+    setM(o,'Feedback', ymOp===0?Math.round(fbReg/7*100):0);
+    setM(tune,'Coarse', MUL||1); setM(tune,'Fine',0);
+    setM(o,'Volume', Math.max(0.0003162277571,Math.pow(10,-(TL*0.75)/20)).toPrecision(7));
+    setM(env,'AttackTime', Math.max(0.1,(ATKTAB[AR]||0)*1000).toPrecision(7));
+    setM(env,'AttackLevel','0.0003162277571');
+    setM(env,'DecayTime', Math.max(1,(DECTAB[D1]||0)*1000*slatt/1020*(SL>=15?1/DECF:1)).toPrecision(7));   // DECF only for full-decay carriers; partial sustains decay gentler
+    setM(env,'DecayLevel','1');
+    setM(env,'SustainLevel', SL>=15?'0.0003162277571':Math.pow(10,-(SL*3)/20).toPrecision(7));
+    setM(env,'ReleaseTime', Math.max(0.1,(DECTAB[2*RR+1]||0)*1000/DECF).toPrecision(7));
+    setM(env,'ReleaseLevel','0.0003162277571');
+  }
+  let out=new XMLSerializer().serializeToString(doc);
+  if(!out.startsWith('<?xml')) out='<?xml version="1.0" encoding="UTF-8"?>\n'+out;
+  return await gzipStr(out);
+}
+function exportAdv(){ if(!bank)return; recordToAdv(sel).then(gz=>{ dl(gz,(readName(sel).toLowerCase().replace(/[^a-z0-9]/g,'')||('inst'+sel))+'.adv'); $("#romstatus").textContent='Exported '+readName(sel)+'.adv (Ableton Operator) \u2014 load it onto an Operator in Live.'; }); }
+
+$("#romfile").onchange=e=>loadRom(e.target.files[0]);
+$("#vgmfile").onchange=e=>{ importVGM(e.target.files[0]); e.target.value=''; };
+$("#patch").onclick=()=>{
+  if(!rom){ $("#romstatus").textContent="Load a ROM first to patch it — or use save .gmi / .tfi / .adv to export this patch."; return; }
+  rom.set(bank, base);
+  let sum=0; for(let i=0x200;i+1<rom.length;i+=2) sum=(sum+((rom[i]<<8)|rom[i+1]))%0x10000;  // MD checksum at $18E
+  rom[0x18E]=(sum>>8)&0xFF; rom[0x18F]=sum&0xFF;
+  const name=romName.replace(/\.(bin|md|gen)$/i,'')+'-inst.bin';
+  const url=URL.createObjectURL(new Blob([rom],{type:'application/octet-stream'}));
+  const a=document.createElement('a'); a.href=url; a.download=name; document.body.appendChild(a); a.click(); a.remove(); URL.revokeObjectURL(url);
+  $("#romstatus").innerHTML=`Patched &amp; downloaded <b>${name}</b> (checksum $${sum.toString(16).toUpperCase().padStart(4,'0')}). Flash it.`;
+};
+// drag-drop: a ROM, or one+ patch files (.gmi/.tfi/.vgi/.adv) anywhere. ONE document-level handler so it
+// works regardless of the drag overlay; patch drops land on the row under the cursor, else the selected slot.
+const _ov=$("#drop-ov"); let _dn=0;
+document.addEventListener('dragenter',e=>{ e.preventDefault(); _dn++; _ov.classList.add('on'); });
+document.addEventListener('dragover', e=>{ e.preventDefault(); if(e.dataTransfer) e.dataTransfer.dropEffect='copy'; });
+document.addEventListener('dragleave',e=>{ if(--_dn<=0){ _dn=0; _ov.classList.remove('on'); } });
+document.addEventListener('drop',e=>{ e.preventDefault(); _dn=0; _ov.classList.remove('on');
+  const fs=e.dataTransfer&&e.dataTransfer.files;
+  if(!fs||!fs.length){ $("#romstatus").innerHTML=`<b style="color:#ff8a8a">Drop delivered no files</b> — some browsers block file drops on a local page. Use <b>load patches…</b> (it multi-selects) instead.`; return; }
+  if(/\.(gmi|tfi|vgi|adv)$/i.test(fs[0].name)){
+    const row=e.target&&e.target.closest&&e.target.closest('.inst');
+    dropPatches(fs, row? +row.dataset.slot : sel);
+  } else loadRom(fs[0]);
+});
+
+// W / S or Up / Down = previous / next slot (skipped while typing in a field)
+window.addEventListener('keydown',e=>{
+  const t=document.activeElement; if(t && (t.tagName==='INPUT'||t.tagName==='SELECT'||t.tagName==='TEXTAREA')) return;
+  let dd=0;
+  if(e.key==='w'||e.key==='W'||e.key==='ArrowUp') dd=-1;
+  else if(e.key==='s'||e.key==='S'||e.key==='ArrowDown') dd=1; else return;
+  e.preventDefault();
+  const ns=Math.max(0,Math.min(NINSTR-1, sel+dd));
+  if(ns!==sel){ sel=ns; renderList(); renderEditor(); const r=$("#ilist").querySelector('.inst.sel'); if(r) r.scrollIntoView({block:'nearest'}); }
+});
+
+// start on the factory bank so all 32 slots are editable with no ROM
+bank=Uint8Array.from(atob(DEFAULT_BANK), c=>c.charCodeAt(0)); sel=0; renderList(); renderEditor();
+</script>
+</body>
+</html>

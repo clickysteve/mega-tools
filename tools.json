@@ -1,0 +1,72 @@
+[
+  {
+    "name": "GENMDDJ Web Player",
+    "path": "webplayer/",
+    "category": "Renderer",
+    "description": "Render a .gmdj through the real ROM and a WebAssembly build of Genesis Plus GX, right in your browser. Full stereo mix or all 10 individual hardware-voice stems, nothing uploaded anywhere. Stem export isn't possible on the hardware itself.",
+    "tag": "renderer"
+  },
+  {
+    "name": "Palette Patcher",
+    "path": "tools/genmddj-palette-patcher.html",
+    "category": "ROM Patchers",
+    "description": "Edit the 8 UI palettes. Click a swatch or type a hex value, snaps to the nearest real Sega colour. Copy/paste and reorder slots, export all 8 at once.",
+    "tag": "patcher"
+  },
+  {
+    "name": "Instrument Patcher",
+    "path": "tools/genmddj-instrument-patcher.html",
+    "category": "ROM Patchers",
+    "description": "Edit the 32 FM patches with a piano audition. Runs standalone (no ROM needed) or patches a .bin directly. Imports/exports .gmi, .tfi, .vgi, and Ableton Operator .adv, plus rips instrument patches straight out of a .vgm game log.",
+    "tag": "patcher + converter"
+  },
+  {
+    "name": "Kit / Sample Patcher",
+    "path": "tools/genmddj-kit-patcher.html",
+    "category": "ROM Patchers",
+    "description": "Drum kits and sample pads: trim, gain, tanh, fade per pad. Drop .wav files straight onto pads. Import/export a single kit as a re-editable .genkit, no ROM required.",
+    "tag": "patcher"
+  },
+  {
+    "name": "Wave Editor",
+    "path": "tools/genmddj-wave-editor.html",
+    "category": "ROM Patchers",
+    "description": "Edit the 16 wavetables (32-step, 8-bit) with canvas drawing, presets, and a live math expression field. Drop a .bin to edit the factory default waves, or a .gmdj to edit one song's.",
+    "tag": "patcher"
+  },
+  {
+    "name": "Font Patcher",
+    "path": "tools/genmddj-font-patcher.html",
+    "category": "ROM Patchers",
+    "description": "Pixel-edit the 8\u00d78 UI font, 96 glyphs plus an auto-derived inverse set. System-font import, presets, ROM-patches a .bin directly or saves for a build-time bake.",
+    "tag": "patcher"
+  },
+  {
+    "name": "Save Tool",
+    "path": "tools/genmddj-savetool.html",
+    "category": "Save & Bank Tools",
+    "description": "Extract .gmdj songs out of a cart save, checksum-validated. Edit config, build a new save from scratch, browse songs/chains/phrases/instruments.",
+    "tag": "save tool"
+  },
+  {
+    "name": "Bank Editor",
+    "path": "tools/genmddj-bank-editor.html",
+    "category": "Save & Bank Tools",
+    "description": "Edit the 32-slot SRAM instrument bank shared across songs. Load/save .gmi per slot, clear, bulk-fill. Config and songs are left untouched.",
+    "tag": "save tool"
+  },
+  {
+    "name": "De-Re-Interleaver",
+    "path": "tools/de-re-interleaver.html",
+    "category": "Save & Bank Tools",
+    "description": "Convert a save file between EverDrive's 64 KB odd-byte-interleaved format and the plain 32 KB logical layout, in either direction.",
+    "tag": "save tool"
+  },
+  {
+    "name": "als2genmddj",
+    "path": "tools/als2genmddj.html",
+    "category": "Converters",
+    "description": "Ableton .als and Standard MIDI .mid to .gmdj, and back. Also plain-text MML to .gmdj. Converts Ableton Operator FM patches to YM2612 patches and back too.",
+    "tag": "converter"
+  }
+]

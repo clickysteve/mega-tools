@@ -88,7 +88,7 @@
     <div class="row">
       <div>
         <label>Duration (seconds)</label>
-        <input type="number" id="seconds" value="30" min="1" max="300">
+        <input type="number" id="seconds" value="30" min="1" max="3600">
       </div>
       <div>
         <label>Sample rate</label>
@@ -356,8 +356,19 @@ function getRom() {
   return customRom ? Promise.resolve(customRom) : loadRom();
 }
 
-async function renderOnce(mod, rom, song, seconds, outputRate, ymCore, voiceMask) {
-  const outSamples = [];
+async function renderOnce(mod, rom, song, seconds, outputRate, ymCore, voiceMask, onProgress) {
+  // pre-allocate the output buffer instead of growing a plain array with
+  // push() -- a 30-minute render at 48kHz is ~170 million push() calls
+  // otherwise, which is slow and memory-hungry for exactly the long-render
+  // case this exists for. A little slack covers resampler rounding.
+  const estFrames = Math.ceil(seconds * outputRate) + outputRate;
+  const outBuf = new Int16Array(estFrames * 2);
+  let outLen = 0;
+  const pushSample = (l, r) => {
+    if (outLen + 1 >= outBuf.length) return; // safety margin exhausted, drop rather than throw
+    outBuf[outLen++] = l | 0;
+    outBuf[outLen++] = r | 0;
+  };
   let resampler = null;
 
   const envCb = mod.addFunction((cmd, dataPtr) => {
@@ -417,16 +428,28 @@ async function renderOnce(mod, rom, song, seconds, outputRate, ymCore, voiceMask
   const inputRate = Math.round(mod.getValue(avInfoPtr + 32, "double"));
   if (!inputRate || fps <= 1) throw new Error("Emulator reported invalid audio/video timing");
 
-  resampler = makeResampler(inputRate, outputRate, (l, r) => outSamples.push(l, r));
+  resampler = makeResampler(inputRate, outputRate, pushSample);
   populateSram(mod.HEAPU8, sramPtr, sramSize, song, voiceMask);
 
+  // run in chunks, yielding to the browser between them -- without this the
+  // tab is completely frozen (unresponsive, no repaint, "Rendering..." never
+  // even shows) for the whole render, which for a 10-30 minute song is
+  // several minutes of a dead-looking tab.
   const frameCount = Math.ceil(seconds * fps);
-  for (let f = 0; f < frameCount; f++) mod._retro_run();
+  const CHUNK = Math.max(1, Math.round(fps)); // ~1 second of emulated time per chunk
+  for (let f = 0; f < frameCount; f++) {
+    mod._retro_run();
+    if (f % CHUNK === 0) {
+      if (onProgress) onProgress(f / frameCount);
+      await new Promise((resolve) => setTimeout(resolve, 0));
+    }
+  }
+  if (onProgress) onProgress(1);
 
   mod._retro_unload_game();
   mod._retro_deinit();
 
-  return buildWavBlob(Int16Array.from(outSamples), outputRate);
+  return buildWavBlob(outBuf.subarray(0, outLen), outputRate);
 }
 
 async function render() {
@@ -446,7 +469,7 @@ async function render() {
     const [{ factory, wasmBinary }, rom] = await Promise.all([loadCore(), getRom()]);
     const song = parseSong(await file.arrayBuffer());
 
-    const seconds = Math.min(300, Math.max(1, parseInt($("#seconds").value, 10) || 30));
+    const seconds = Math.min(3600, Math.max(1, parseInt($("#seconds").value, 10) || 30));
     const outputRate = parseInt($("#rate").value, 10);
     const ymCore = $("#core").value;
 
@@ -463,17 +486,17 @@ async function render() {
     };
 
     if (wantMix) {
-      status.textContent = "Rendering main mix\u2026";
       const mod = await factory({ wasmBinary });
-      const blob = await renderOnce(mod, rom, song, seconds, outputRate, ymCore, VOICE_MASK_ALL);
+      const blob = await renderOnce(mod, rom, song, seconds, outputRate, ymCore, VOICE_MASK_ALL,
+        (frac) => { status.textContent = `Rendering main mix\u2026 ${Math.round(frac * 100)}%`; });
       addTrack("mix", blob);
     }
 
     if (wantStems) {
       for (let i = 0; i < STEM_NAMES.length; i++) {
-        status.textContent = `Rendering stems\u2026 (${i + 1}/${STEM_NAMES.length}: ${STEM_NAMES[i]})`;
         const mod = await factory({ wasmBinary });
-        const blob = await renderOnce(mod, rom, song, seconds, outputRate, ymCore, 1 << i);
+        const blob = await renderOnce(mod, rom, song, seconds, outputRate, ymCore, 1 << i,
+          (frac) => { status.textContent = `Rendering stems\u2026 (${i + 1}/${STEM_NAMES.length}: ${STEM_NAMES[i]}) ${Math.round(frac * 100)}%`; });
         addTrack(STEM_NAMES[i], blob);
       }
     }

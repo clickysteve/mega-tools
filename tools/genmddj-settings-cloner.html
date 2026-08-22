@@ -1,0 +1,292 @@
+<!doctype html>
+<!--
+  genmddj ROM settings cloner -- carries your customizations (palettes,
+  instruments, font, wavetables, drum kit, default settings) from an old
+  patched ROM onto a freshly built newer ROM, so you don't have to redo
+  every patcher tool by hand each release.
+
+  Every region below is located by its own ROM marker string (the same ones
+  the individual patcher tools already use) rather than a fixed offset,
+  since code size shifts between versions. Default settings have no marker
+  at all (they're immediate values baked into boot code, not a data block),
+  so they're found by anchoring on opt_vid's boot-time write (verified
+  unique in the ROM) and searching a small window around it for the rest --
+  verified against two real ROM builds (v0.19, v0.20) before shipping this.
+-->
+<html>
+<head>
+<meta charset="utf-8">
+<title>genmddj ROM settings cloner</title>
+<style>
+  :root{ --pad:18px; }
+  body{ margin:0; font:14px/1.4 -apple-system,Segoe UI,Roboto,sans-serif;
+        background:#15171c; color:#cfd6e0; }
+  header{ padding:14px var(--pad); border-bottom:1px solid #2a2e38; }
+  header h1{ font-size:17px; margin:0; }
+  header .sub{ color:#7d8595; font-size:12px; }
+  main{ max-width:640px; margin:0 auto; padding:var(--pad); }
+  .card{ background:#1b1f27; border:1px solid #2a2e38; border-radius:8px; padding:16px; margin-bottom:16px; }
+  .drop{ border:2px dashed #2a2e38; border-radius:8px; padding:18px; text-align:center;
+         color:#7d8595; cursor:pointer; transition:border-color .15s,color .15s; margin-bottom:12px; }
+  .drop.hot{ border-color:#2b6cb0; color:#cfd6e0; background:#1a2230; }
+  .drop b{ color:#cfd6e0; }
+  .drop .fname{ margin-top:6px; font-family:ui-monospace,monospace; font-size:12px; color:#6ea8e0; }
+  h2{ font-size:12px; text-transform:uppercase; letter-spacing:.08em; color:#7d8595; margin:0 0 10px; }
+  .catgroup{ border:1px solid #2a2e38; border-radius:8px; padding:12px 14px; margin-bottom:10px; }
+  .catgroup .cathead{ display:flex; align-items:center; gap:8px; font-weight:600; font-size:13.5px; margin-bottom:4px; }
+  .catgroup .catdesc{ font-size:12px; color:#7d8595; margin:0 0 4px 24px; }
+  .catgroup .catstatus{ font-size:12px; margin:4px 0 0 24px; }
+  .catstatus.ok{ color:#7ee787; }
+  .catstatus.warn{ color:#f2b34d; }
+  .catstatus.err{ color:#ff8a8a; }
+  .selectall{ display:flex; justify-content:flex-end; margin-bottom:8px; }
+  .selectall button{ background:none; border:none; color:#6ea8e0; font-size:12px; cursor:pointer; padding:2px 6px; }
+  input[type=checkbox]{ width:16px; height:16px; }
+  button.primary{ background:#2b6cb0; color:#fff; border:0; border-radius:7px; padding:10px 18px;
+          font:inherit; font-weight:600; cursor:pointer; width:100%; margin-top:6px; }
+  button.primary:disabled{ opacity:.5; cursor:not-allowed; }
+  .status{ font-size:13px; color:#9aa3b2; margin-top:12px; white-space:pre-wrap; }
+  .status.err{ color:#ff8a8a; }
+  .note{ font-size:12px; color:#7d8595; margin-top:10px; }
+</style>
+</head>
+<body>
+<header>
+  <h1>genmddj ROM settings cloner</h1>
+  <span class="sub">carry your customizations from an old ROM onto a freshly built one</span>
+</header>
+<main>
+  <div class="card">
+    <h2>Old ROM (has your settings)</h2>
+    <div class="drop" id="dropOld">Drop your existing patched ROM here, or click to choose<div class="fname" id="fnameOld"></div></div>
+    <input type="file" id="fileOld" accept=".bin,.md,.gen" hidden>
+
+    <h2 style="margin-top:16px">New ROM (to apply them to)</h2>
+    <div class="drop" id="dropNew">Drop the freshly built/downloaded ROM here, or click to choose<div class="fname" id="fnameNew"></div></div>
+    <input type="file" id="fileNew" accept=".bin,.md,.gen" hidden>
+  </div>
+
+  <div class="card">
+    <h2>What to clone</h2>
+    <div class="selectall"><button id="selAll" type="button">Select all</button><button id="selNone" type="button">Select none</button></div>
+    <div id="categories"></div>
+    <button class="primary" id="go" disabled>Clone selected &rarr; download patched ROM</button>
+    <div class="status" id="status"></div>
+  </div>
+
+  <div class="note">Everything runs locally in this tab; neither ROM is uploaded anywhere. Each region is found by its own marker in both ROMs (not a fixed offset), so this should keep working across future genmddj releases as long as the markers themselves don't change.</div>
+</main>
+
+<script>
+const $ = s => document.querySelector(s);
+
+function setupDrop(dropId, fileId, fnameId, onLoaded) {
+  const drop = $(dropId), input = $(fileId), fname = $(fnameId);
+  drop.onclick = () => input.click();
+  input.onchange = () => { if (input.files[0]) handle(input.files[0]); };
+  ["dragenter", "dragover"].forEach(ev => drop.addEventListener(ev, e => { e.preventDefault(); drop.classList.add("hot"); }));
+  ["dragleave", "dragend"].forEach(ev => drop.addEventListener(ev, () => drop.classList.remove("hot")));
+  drop.addEventListener("drop", e => {
+    e.preventDefault(); drop.classList.remove("hot");
+    const f = e.dataTransfer.files[0];
+    if (f) { input.files = e.dataTransfer.files; handle(f); }
+  });
+  async function handle(f) {
+    fname.textContent = f.name;
+    const bytes = new Uint8Array(await f.arrayBuffer());
+    onLoaded(bytes, f.name);
+  }
+}
+
+// ---- generic marker search ----
+// generic marker search -- returns the offset right AFTER the marker ends,
+// matching the convention every existing patcher tool already uses.
+function findMarker(rom, marker) {
+  const bytes = typeof marker === "string" ? [...marker].map(c => c.charCodeAt(0)) : marker;
+  outer: for (let i = 0; i + bytes.length <= rom.length; i++) {
+    for (let j = 0; j < bytes.length; j++) if (rom[i + j] !== bytes[j]) continue outer;
+    return i + bytes.length;
+  }
+  return -1;
+}
+
+// ---- fixed-size data-block categories ----
+const FIXED_CATEGORIES = [
+  { id: "palettes", name: "Palettes", desc: "The 8 UI colour palettes.", marker: "GMDJPAL0", afterMarker: 0, size: 48 },
+  { id: "instruments", name: "FM Instruments", desc: "The 32 factory FM patches.", marker: "GMINSTR0", afterMarker: 0, size: 32 * 64 },
+  { id: "font", name: "Font", desc: "The pixel font, all glyphs plus their inverse set.", marker: "GMDJFON0", afterMarker: 0, size: 192 * 32 },
+  { id: "waves", name: "Wavetables", desc: "The 16 default wavetables.", marker: "GMDJWAV0", afterMarker: 0, size: 16 * 32 },
+];
+
+// ---- kit/sample pool: variable size, needs its header+directory parsed
+// to find the real used length (it may "grow into" trailing $FF padding,
+// so a blind fixed-size copy would either truncate real data or drag along
+// a huge amount of meaningless padding).
+function analyzeKit(rom, poolOffset) {
+  const HEADER = 16, MEMBER = 16;
+  const be32 = (b, o) => (b[o] << 24 | b[o+1] << 16 | b[o+2] << 8 | b[o+3]) >>> 0;
+  const be16 = (b, o) => (b[o] << 8 | b[o+1]) >>> 0;
+  const NKITS = rom[poolOffset + 8], NPADS = rom[poolOffset + 9], DAC_RATE = be16(rom, poolOffset + 10);
+  const dirSize = NKITS * NPADS * MEMBER;
+  const poolBase = HEADER + dirSize;
+  let maxEnd = poolBase;
+  for (let k = 0; k < NKITS; k++) {
+    for (let p = 0; p < NPADS; p++) {
+      const m = poolOffset + HEADER + (k * NPADS + p) * MEMBER;
+      const off = be32(rom, m), len = be32(rom, m + 4);
+      if (len > 0) maxEnd = Math.max(maxEnd, poolBase + off + len);
+    }
+  }
+  return { NKITS, NPADS, DAC_RATE, totalSize: maxEnd };
+}
+
+// ---- default settings: no marker at all (immediate values in boot code).
+// opt_vid's boot-time write is verified globally unique in the ROM; every
+// other setting is found only if it's within 100 bytes of that anchor, to
+// avoid picking up unrelated writes to the same address elsewhere in the
+// code (verified this actually happens for opt_sync -- there's a second,
+// unrelated write far away that forces sync off specifically for rendering).
+const DEFAULT_SETTINGS = [
+  { name: "opt_vid", addr: 0x00FFE3E4 },
+  { name: "opt_clock", addr: 0x00FFD42F },
+  { name: "opt_sync", addr: 0x00FFE3E5 },
+  { name: "sync_shadow", addr: 0x00FFD43A },
+  { name: "opt_pal", addr: 0x00FFE3E6 },
+  { name: "opt_clon", addr: 0x00FFD759 },
+  { name: "opt_audit", addr: 0x00FFD75A },
+  { name: "opt_hints", addr: 0x00FFD75B },
+];
+function findMovbImmToAddr(rom, addr) {
+  const addrBytes = [(addr>>>24)&0xFF, (addr>>>16)&0xFF, (addr>>>8)&0xFF, addr&0xFF];
+  const matches = [];
+  outer: for (let i = 0; i + 8 <= rom.length; i++) {
+    for (let j = 0; j < 4; j++) if (rom[i + 4 + j] !== addrBytes[j]) continue outer;
+    if (((rom[i] << 8) | rom[i + 1]) === 0x13FC) matches.push({ offset: i, value: rom[i + 3] });
+  }
+  return matches;
+}
+function locateDefaultSettings(rom) {
+  const vidMatches = findMovbImmToAddr(rom, 0x00FFE3E4);
+  if (vidMatches.length !== 1) return null; // anchor must be unique, or we can't trust anything found near it
+  const anchor = vidMatches[0].offset;
+  const found = { opt_vid: vidMatches[0] };
+  for (const s of DEFAULT_SETTINGS.slice(1)) {
+    const matches = findMovbImmToAddr(rom, s.addr).filter(m => Math.abs(m.offset - anchor) < 100);
+    if (matches.length !== 1) return null; // ambiguous or missing -- don't guess
+    found[s.name] = matches[0];
+  }
+  return found;
+}
+
+function fixChecksum(rom) {
+  let sum = 0;
+  for (let i = 0x200; i + 1 < rom.length; i += 2) sum = (sum + ((rom[i] << 8) | rom[i + 1])) % 0x10000;
+  rom[0x18E] = (sum >> 8) & 0xFF; rom[0x18F] = sum & 0xFF;
+  return sum;
+}
+
+let oldRom = null, newRom = null, oldName = "", newName = "";
+setupDrop("#dropOld", "#fileOld", "#fnameOld", (b, n) => { oldRom = b; oldName = n; refreshCategories(); });
+setupDrop("#dropNew", "#fileNew", "#fnameNew", (b, n) => { newRom = b; newName = n; refreshCategories(); });
+
+const CATS = [...FIXED_CATEGORIES, { id: "kit", name: "Drum Kit / Samples", desc: "Custom kits and sample pads." },
+              { id: "defaults", name: "Default Settings", desc: "Boot defaults: video region, clock region, sync mode, UI palette slot, clone depth, audition, INSTR hints." }];
+
+function buildCategoryUI() {
+  const wrap = $("#categories");
+  wrap.innerHTML = "";
+  for (const c of CATS) {
+    const el = document.createElement("div");
+    el.className = "catgroup";
+    el.innerHTML = `<label class="cathead"><input type="checkbox" id="cat-${c.id}" checked><span>${c.name}</span></label>` +
+                   `<div class="catdesc">${c.desc}</div><div class="catstatus" id="catstatus-${c.id}"></div>`;
+    wrap.appendChild(el);
+  }
+}
+buildCategoryUI();
+$("#selAll").onclick = () => CATS.forEach(c => $(`#cat-${c.id}`).checked = true);
+$("#selNone").onclick = () => CATS.forEach(c => $(`#cat-${c.id}`).checked = false);
+
+function setCatStatus(id, text, cls) {
+  const el = $(`#catstatus-${id}`);
+  el.textContent = text;
+  el.className = "catstatus" + (cls ? " " + cls : "");
+}
+
+function refreshCategories() {
+  $("#go").disabled = !(oldRom && newRom);
+  if (!oldRom || !newRom) return;
+  for (const c of FIXED_CATEGORIES) {
+    const oldOfs = findMarker(oldRom, c.marker), newOfs = findMarker(newRom, c.marker);
+    if (oldOfs < 0 || newOfs < 0) setCatStatus(c.id, `marker not found in ${oldOfs < 0 ? "old" : "new"} ROM -- skipped`, "err");
+    else setCatStatus(c.id, `found in both (${c.size} bytes)`, "ok");
+  }
+  try {
+    const oldPool = findMarker(oldRom, "GMDJKIT1"), newPool = findMarker(newRom, "GMDJKIT1");
+    if (oldPool < 0 || newPool < 0) setCatStatus("kit", "marker not found in one of the ROMs -- skipped", "err");
+    else {
+      const info = analyzeKit(oldRom, oldPool);
+      const newAvail = newRom.length - newPool;
+      if (info.totalSize > newAvail) setCatStatus("kit", `${info.totalSize}B needed but only ${newAvail}B available in new ROM -- skipped`, "err");
+      else setCatStatus("kit", `${info.NKITS} kits, ${info.NPADS} pads, ${info.totalSize}B -- fits`, "ok");
+    }
+  } catch (e) { setCatStatus("kit", "couldn't read kit pool -- skipped: " + e.message, "err"); }
+  const oldDefaults = locateDefaultSettings(oldRom), newDefaults = locateDefaultSettings(newRom);
+  if (!oldDefaults || !newDefaults) setCatStatus("defaults", "couldn't confidently locate all 8 settings in one ROM -- skipped", "err");
+  else setCatStatus("defaults", "all 8 settings located confidently in both ROMs", "ok");
+}
+
+$("#go").onclick = () => {
+  const status = $("#status");
+  status.className = "status";
+  const out = new Uint8Array(newRom); // work on a copy of the new ROM
+  const lines = [];
+
+  for (const c of FIXED_CATEGORIES) {
+    if (!$(`#cat-${c.id}`).checked) continue;
+    const oldOfs = findMarker(oldRom, c.marker), newOfs = findMarker(newRom, c.marker);
+    if (oldOfs < 0 || newOfs < 0) { lines.push(`${c.name}: skipped (marker missing)`); continue; }
+    const srcStart = oldOfs + c.afterMarker, dstStart = newOfs + c.afterMarker;
+    out.set(oldRom.subarray(srcStart, srcStart + c.size), dstStart);
+    lines.push(`${c.name}: cloned (${c.size} bytes)`);
+  }
+
+  if ($("#cat-kit").checked) {
+    try {
+      const oldPool = findMarker(oldRom, "GMDJKIT1"), newPool = findMarker(newRom, "GMDJKIT1");
+      if (oldPool < 0 || newPool < 0) throw new Error("marker missing");
+      const info = analyzeKit(oldRom, oldPool);
+      const newAvail = newRom.length - newPool;
+      if (info.totalSize > newAvail) throw new Error(`needs ${info.totalSize}B, only ${newAvail}B available`);
+      out.set(oldRom.subarray(oldPool, oldPool + info.totalSize), newPool);
+      lines.push(`Drum Kit / Samples: cloned (${info.totalSize} bytes, ${info.NKITS} kits x ${info.NPADS} pads)`);
+    } catch (e) { lines.push(`Drum Kit / Samples: skipped (${e.message})`); }
+  }
+
+  if ($("#cat-defaults").checked) {
+    const oldDefaults = locateDefaultSettings(oldRom), newDefaults = locateDefaultSettings(newRom);
+    if (!oldDefaults || !newDefaults) {
+      lines.push("Default Settings: skipped (couldn't confidently locate all settings)");
+    } else {
+      for (const s of DEFAULT_SETTINGS) {
+        const val = oldDefaults[s.name].value;
+        out[newDefaults[s.name].offset + 3] = val;
+      }
+      lines.push("Default Settings: cloned (8 values)");
+    }
+  }
+
+  const checksum = fixChecksum(out);
+  lines.push(`\nChecksum re-fixed: $${checksum.toString(16).toUpperCase().padStart(4, "0")}`);
+  status.textContent = lines.join("\n");
+
+  const outName = newName.replace(/\.(bin|md|gen)$/i, "") + "-cloned.bin";
+  const url = URL.createObjectURL(new Blob([out], { type: "application/octet-stream" }));
+  const a = document.createElement("a");
+  a.href = url; a.download = outName;
+  document.body.appendChild(a); a.click(); a.remove();
+  URL.revokeObjectURL(url);
+};
+</script>
+</body>
+</html>

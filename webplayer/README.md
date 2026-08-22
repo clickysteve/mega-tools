@@ -18,6 +18,8 @@ entirely in the browser tab. No server-side processing, nothing uploaded
 anywhere, everything (ROM, emulator core, your song) stays local to the page.
 
 * Renders the main stereo mix, the 10 individual hardware-voice stems, or both
+* Up to an hour per render, with a live progress percentage; stays responsive
+  throughout (long renders used to freeze the tab solid with no feedback)
 * Play results back immediately with the built-in `<audio>` players, or download them
 * Multiple outputs (stems) can be downloaded together as one `.zip`
 * Drag-and-drop or click to choose a `.gmdj`

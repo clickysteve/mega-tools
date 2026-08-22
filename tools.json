@@ -42,6 +42,13 @@
     "tag": "patcher"
   },
   {
+    "name": "Settings Cloner",
+    "path": "tools/genmddj-settings-cloner.html",
+    "category": "ROM Patchers",
+    "description": "Carry your customizations from an old ROM onto a freshly built newer one: palettes, FM instruments, font, wavetables, drum kit/samples, and boot defaults (video/clock region, sync mode, clone depth, audition, hints). Pick exactly which categories to clone.",
+    "tag": "patcher"
+  },
+  {
     "name": "Save Tool",
     "path": "tools/genmddj-savetool.html",
     "category": "Save & Bank Tools",
